@@ -1,0 +1,11 @@
+rfid_ms\bsp_xpt2046_lcd.o: ..\BSP\lcd\bsp_xpt2046_lcd.c
+rfid_ms\bsp_xpt2046_lcd.o: ..\BSP\lcd\bsp_xpt2046_lcd.h
+rfid_ms\bsp_xpt2046_lcd.o: D:\Keil_v5\MDK\ARM\PACK\Keil\STM32F1xx_DFP\2.3.0\Device\Include\stm32f10x.h
+rfid_ms\bsp_xpt2046_lcd.o: .\RTE\_RFID_MS\RTE_Components.h
+rfid_ms\bsp_xpt2046_lcd.o: ../Drivers/CMSIS/Include/core_cm3.h
+rfid_ms\bsp_xpt2046_lcd.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stdint.h
+rfid_ms\bsp_xpt2046_lcd.o: ../Drivers/CMSIS/Include/cmsis_version.h
+rfid_ms\bsp_xpt2046_lcd.o: ../Drivers/CMSIS/Include/cmsis_compiler.h
+rfid_ms\bsp_xpt2046_lcd.o: ../Drivers/CMSIS/Include/cmsis_armcc.h
+rfid_ms\bsp_xpt2046_lcd.o: D:\Keil_v5\MDK\ARM\PACK\Keil\STM32F1xx_DFP\2.3.0\Device\Include\system_stm32f10x.h
+rfid_ms\bsp_xpt2046_lcd.o: ..\BSP\lcd\bsp_ili9341_lcd.h
