@@ -18,7 +18,7 @@
 #ifndef _GOODIX_GTXX_H
 #define _GOODIX_GTXX_H
 
-#include "stm32f1xx.h"
+#include "stm32f1xx_hal.h"
 
 #ifndef NULL
   #define NULL        0
@@ -205,6 +205,7 @@ void GTP_IRQ_Disable(void);
 void GTP_IRQ_Enable(void);
 int32_t GTP_Init_Panel(void);
 int8_t GTP_Send_Command(uint8_t command);
-int	GTP_Execu( int *x,int *y);                                       
+int	GTP_Execu( uint16_t *x,uint16_t *y);                                       
 
+                                       
 #endif /* _GOODIX_GT9XX_H_ */

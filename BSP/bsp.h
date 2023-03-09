@@ -3,6 +3,7 @@
 
 /******************************** м╥нд╪Ч *************************************/
 #include "./lcd/bsp_nt35510_lcd.h"
+#include "bsp_gt9147_lcd.h"
 #include "./flash/bsp_spi_flash.h"
 #include "./font/fonts.h"	
 #include "./touch/bsp_i2c_touch.h"

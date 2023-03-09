@@ -952,7 +952,7 @@ void GTP_IRQHandler(void)
 	if(__HAL_GPIO_EXTI_GET_IT(GTP_INT_GPIO_PIN) != RESET) //确保是否产生了EXTI Line中断
 	{
 		HAL_GPIO_TogglePin(LED1_GPIO_Port,LED1_Pin);
-        GTP_TouchProcess();    
+        //GTP_TouchProcess();    
 		__HAL_GPIO_EXTI_CLEAR_IT(GTP_INT_GPIO_PIN);     //清除中断标志位
 	}      
 }
@@ -963,7 +963,7 @@ void GTP_IRQHandler(void)
   * @param x[out] y[out] 读取到的坐标
   * @retval 坐标有效返回1，否则返回0
   */
-int	GTP_Execu( int *x,int *y)
+int	GTP_Execu( uint16_t *x,uint16_t *y)
 {
     uint8_t  end_cmd[3] = {GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF, 0};
     //2-寄存器地址 1-状态寄存器 8*1-每个触摸点使用8个寄存器 

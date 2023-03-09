@@ -158,9 +158,6 @@ void RTC_Set(uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_
     }
 }
 
-/* USER CODE END 1 */
-
-/* USER CODE BEGIN 2 */
 /* 操作寄存器来获取RTC_CNT中计数的值 */
 uint32_t Read_UnixTime()
 {
@@ -180,9 +177,6 @@ void Write_UnixTime(uint32_t unix)
     return ;
 }
 
-/* USER CODE END 2 */
-
-/* USER CODE END 3 */
 /* 使用纯Unix时间戳方法来计算日期时间 */
 void RTC_Set_UnixTime(uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_t minute, uint32_t second)
 {
@@ -204,4 +198,4 @@ uint32_t RTC_Get_UnixTime()
     return Read_UnixTime();
 }
 
-/* USER CODE END 3 */
+/* USER CODE END 1 */
