@@ -15,10 +15,11 @@
  * 
  */
 
-#ifndef _GOODIX_GTXX_H
-#define _GOODIX_GTXX_H
+#ifndef _BSP_GT9147_H
+#define _BSP_GT9147_H
 
 #include "stm32f1xx_hal.h"
+#include "bsp_touch.h"
 
 #ifndef NULL
   #define NULL        0
@@ -205,7 +206,7 @@ void GTP_IRQ_Disable(void);
 void GTP_IRQ_Enable(void);
 int32_t GTP_Init_Panel(void);
 int8_t GTP_Send_Command(uint8_t command);
-int	GTP_Execu( uint16_t *x,uint16_t *y);                                       
-
-                                       
-#endif /* _GOODIX_GT9XX_H_ */
+int	GTP_Execu( uint16_t *x,uint16_t *y);                           
+void GTP_GetSta(Touch_Sta_t *touch_dev);
+                  
+#endif /* _BSP_GT9147_H */

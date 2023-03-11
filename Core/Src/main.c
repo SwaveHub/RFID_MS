@@ -21,6 +21,7 @@
 #include "cmsis_os.h"
 #include "rtc.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 #include "fsmc.h"
@@ -92,13 +93,15 @@ int main(void)
   MX_GPIO_Init();
   MX_RTC_Init();
   MX_USART1_UART_Init();
-  MX_FSMC_Init();
+  //MX_FSMC_Init();
   MX_SPI2_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
     SPI_FLASH_Init();
     font_init();
-    //NT35510_Init();
-    //GTP_Init_Panel(); 
+    LCD_Init();
+    Touch_Init();
+    
     lv_init();                  // lvgl初始化，如果这个没有初始化，那么下面的初始化会崩溃
     lv_port_disp_init();        // 显示器初始化
     lv_port_indev_init();       // 输入设备初始化（如果没有实现就注释掉）

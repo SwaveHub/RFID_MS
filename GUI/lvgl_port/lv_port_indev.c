@@ -10,7 +10,7 @@
  *      INCLUDES
  *********************/
 #include "lv_port_indev.h"
-#include "bsp_gt9147_lcd.h"
+#include "bsp_touch.h"
 /*********************
  *      DEFINES
  *********************/
@@ -69,7 +69,7 @@ void lv_port_indev_init(void)
 static void touchpad_init(void)
 {
     /*Your code comes here*/
-    GT9147_Init();
+//    Touch_Init();
 }
 
 /* Will be called by the library to read the touchpad */
@@ -89,7 +89,7 @@ static bool touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
     /*Set the last pressed coordinates*/
     data->point.x = last_x;
     data->point.y = last_y;
-
+    
     /*Return `false` because we are not buffering and no more data to read*/
     return false;
 }
@@ -98,7 +98,7 @@ static bool touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
 static bool touchpad_is_pressed(void)
 {
     /*Your code comes here*/
-    if(TOUCH_PRESSED == GT9147_TouchDetect())
+    if(Touch_TouchDetect(&Touch_Dev) == TOUCH_PRESSED)
     {
         return true;
     }
@@ -109,11 +109,8 @@ static bool touchpad_is_pressed(void)
 static void touchpad_get_xy(lv_coord_t * x, lv_coord_t * y)
 {
     /*Your code comes here*/
-    static strType_GT9147_Coordinate cinfo = {-1,-1,-1,-1};
-    GT9147_Get_TouchedPoint(&cinfo);
-
-    (*x) = cinfo.x;
-    (*y) = cinfo.y;
+    (*x) = Touch_Dev.x;
+    (*y) = Touch_Dev.y;
 }
 
 

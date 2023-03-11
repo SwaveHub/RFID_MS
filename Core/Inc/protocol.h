@@ -6,7 +6,7 @@
 
 /******************************** ∫Í∂®“Â *************************************/
 #define FORMAT_SET  "SET:"
-#define FORMAT_SET_LEN  (sizeof(FORMAT_SET) - 1)
+#define FORMAT_SET_LEN  (strlen(FORMAT_SET))
 
 #define PARM_NUM  5
 

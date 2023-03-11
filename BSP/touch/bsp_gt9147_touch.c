@@ -1,6 +1,6 @@
 /**
   ******************************************************************************
-  * @file    gt9xx.c
+  * @file    bsp_gt9147_touch.c
   * @author  fire
   * @version V1.0
   * @date    2023-xx-xx
@@ -17,10 +17,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "./touch/gt9xx.h"
+#include "./touch/bsp_gt9147_touch.h"
 #include "./touch/bsp_i2c_touch.h"
-#include "./lcd/bsp_nt35510_lcd.h"
-#include "./touch/palette.h"
+#include "./touch/bsp_touch.h"
 #include "bsp.h"
 
 // 4.3寸屏GT9147驱动配置
@@ -283,12 +282,6 @@ static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
     GTP_DEBUG("ID:%d, X:%d, Y:%d, W:%d", id, x, y, w);
 
 	
-    /* 处理触摸按钮，用于触摸画板 */
-    Touch_Button_Down(x,y); 
-	
-
-    /*处理描绘轨迹，用于触摸画板 */
-    Draw_Trail(pre_x[id],pre_y[id],x,y,&brush);
 	
 		/************************************/
 		/*在此处添加自己的触摸点按下时处理过程即可*/
@@ -308,10 +301,6 @@ static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
   */
 static void GTP_Touch_Up( int32_t id)
 {
-	
-
-    /*处理触摸释放,用于触摸画板*/
-    Touch_Button_Up(pre_x[id],pre_y[id]);
 
 		/*****************************************/
 		/*在此处添加自己的触摸点释放时的处理过程即可*/
@@ -759,7 +748,7 @@ Output:
 
 #endif
 	 /* emXGUI示例中不使能中断 */
-		GTP_IRQ_Enable();
+		GTP_IRQ_Disable();
 	
     GTP_Get_Info();
 
@@ -958,23 +947,27 @@ void GTP_IRQHandler(void)
 }
 
 /**
-  * @brief  触屏检测函数，本函数作为emXGUI的定制检测函数，
-   *        参考Goodix_TS_Work_Func修改而来， 只读取单个触摸点坐标
-  * @param x[out] y[out] 读取到的坐标
-  * @retval 坐标有效返回1，否则返回0
+  * @brief   触屏处理函数，轮询或者在触摸中断调用
+  * @param touch_dev
+*   @retval  无
   */
-int	GTP_Execu( uint16_t *x,uint16_t *y)
+void GTP_GetSta(Touch_Sta_t *touch_dev)
 {
     uint8_t  end_cmd[3] = {GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF, 0};
-    //2-寄存器地址 1-状态寄存器 8*1-每个触摸点使用8个寄存器 
-    uint8_t  point_data[2 + 1 + 8 * 1 + 1]={GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF};
+    uint8_t  point_data[2 + 1 + 8 * GTP_MAX_TOUCH + 1]={GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF};
     uint8_t  touch_num = 0;
     uint8_t  finger = 0;
+    static uint16_t pre_touch = 0;
+    static uint8_t pre_id[GTP_MAX_TOUCH] = {0};
 
     uint8_t client_addr=GTP_ADDRESS;
+    uint8_t* coor_data = NULL;
     int32_t input_x = 0;
     int32_t input_y = 0;
-
+    int32_t input_w = 0;
+    uint8_t id = 0;
+ 
+    int32_t i  = 0;
     int32_t ret = -1;
 
     GTP_DEBUG_FUNC();
@@ -983,14 +976,15 @@ int	GTP_Execu( uint16_t *x,uint16_t *y)
     if (ret < 0)
     {
         GTP_ERROR("I2C transfer error. errno:%d\n ", ret);
-        return 0;
+
+        return;
     }
     
     finger = point_data[GTP_ADDR_LENGTH];//状态寄存器数据
 
     if (finger == 0x00)		//没有数据，退出
     {
-        return 0;
+        return;
     }
 
     if((finger & 0x80) == 0)//判断buffer status位
@@ -1002,40 +996,76 @@ int	GTP_Execu( uint16_t *x,uint16_t *y)
     if (touch_num > GTP_MAX_TOUCH)
     {
         goto exit_work_func;//大于最大支持点数，错误退出
-    }    
-  
+    }
+
+    if (touch_num > 1)//不止一个点
+    {
+        uint8_t buf[8 * GTP_MAX_TOUCH] = {(GTP_READ_COOR_ADDR + 10) >> 8, (GTP_READ_COOR_ADDR + 10) & 0xff};
+
+        ret = GTP_I2C_Read(client_addr, buf, 2 + 8 * (touch_num - 1));
+        memcpy(&point_data[12], &buf[2], 8 * (touch_num - 1));			//复制其余点数的数据到point_data
+    }
+
+    
+    
+    if (pre_touch>touch_num)				//pre_touch>touch_num,表示有的点释放了
+    {
+        for (i = 0; i < pre_touch; i++)						//一个点一个点处理
+         {
+            uint8_t j;
+           for(j=0; j<touch_num; j++)
+           {
+               coor_data = &point_data[j * 8 + 3];
+               id = coor_data[0] & 0x0F;									//track id
+              if(pre_id[i] == id)
+                break;
+
+              if(j >= touch_num-1)											//遍历当前所有id都找不到pre_id[i]，表示已释放
+              {
+                 touch_dev->sta = TOUCH_NOT_PRESSED;
+              }
+           }
+       }
+    }
+
+
     if (touch_num)
     {
-//      id = point_data[0] & 0x0F;									//track id
+        for (i = 0; i < touch_num; i++)						//一个点一个点处理
+        {
+            coor_data = &point_data[i * 8 + 3];
 
-      input_x  = point_data[3+1] | (point_data[3+2] << 8);	//x坐标
-      input_y  = point_data[3+3] | (point_data[3+4] << 8);	//y坐标
-//      input_w  = coor_data[5] | (coor_data[6] << 8);	//size
+            id = coor_data[0] & 0x0F;									//track id
+            pre_id[i] = id;
 
-      if(input_x < GTP_MAX_WIDTH && input_y < GTP_MAX_HEIGHT)  
+            input_x  = coor_data[1] | (coor_data[2] << 8);	//x坐标
+            input_y  = coor_data[3] | (coor_data[4] << 8);	//y坐标
+            input_w  = coor_data[5] | (coor_data[6] << 8);	//size
+            
+            touch_dev->sta = TOUCH_PRESSED;
+            touch_dev->x = input_x;
+            touch_dev->y = input_y;
+        }
+    }
+    else if (pre_touch)		//touch_ num=0 且pre_touch！=0
+    {
+      for(i=0;i<pre_touch;i++)
       {
-        *x = input_x;
-        *y = 480 - input_y;   // 交换一下y
-      }
-      else
-      {
-          //超出范围，错误退出
-         goto exit_work_func;
+          touch_dev->sta = TOUCH_NOT_PRESSED;
       }
     }
 
+
+    pre_touch = touch_num;
+
+
 exit_work_func:
     {
-        //清空标志
         ret = GTP_I2C_Write(client_addr, end_cmd, 3);
         if (ret < 0)
         {
             GTP_INFO("I2C write end_cmd error!");
-            return 0;
         }
     }
 
-    return touch_num;
 }
-//MODULE_DESCRIPTION("GTP Series Driver");
-//MODULE_LICENSE("GPL");

@@ -17,76 +17,91 @@
 #include "./lcd/bsp_nt35510_lcd.h"
 #include "./font/fonts.h"	
 #include "string.h"	
+#include "bsp.h"	
 
 static SRAM_HandleTypeDef  SRAM_Handler;
 static FSMC_NORSRAM_TimingTypeDef readWriteTiming;
 static FSMC_NORSRAM_TimingTypeDef writeTiming;
-//根据液晶扫描方向而变化的XY像素宽度
-//调用NT35510_GramScan函数设置方向时会自动更改
-uint16_t LCD_X_LENGTH = NT35510_MORE_PIXEL;
-uint16_t LCD_Y_LENGTH = NT35510_LESS_PIXEL;
+
+static void                   NT35510_Delay ( __IO uint32_t nCount );
+static void                   NT35510_GPIO_Config         ( void );
+static void                   NT35510_FSMC_Config         ( void );
+
+//LCD的画笔颜色和背景色	   
+uint16_t POINT_COLOR=0x0000;	//画笔颜色
+uint16_t BACK_COLOR=0xFFFF;  //背景色 
 
 //管理LCD重要参数
 //默认为竖屏
 _lcd_dev lcddev;
 
-//液晶屏扫描模式，本变量主要用于方便选择触摸屏的计算参数
-//参数可选值为0-7
-//调用NT35510_GramScan函数设置方向时会自动更改
-//LCD刚初始化完成时会使用本默认值
-uint8_t LCD_SCAN_MODE = 0;
 
-//缓存读取回来的字模数据
-static uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
-
-static sFONT *LCD_Currentfonts = &Font16x32;  //英文字体
-static uint16_t CurrentTextColor   = WHITE;//前景色
-static uint16_t CurrentBackColor   = BLUE;//背景色
-
-__inline void                 NT35510_Write_Cmd           ( uint16_t usCmd );
-__inline void                 NT35510_Write_Data          ( uint16_t usData );
-__inline uint16_t             NT35510_Read_Data           ( void );
-static void                   NT35510_Delay               ( __IO uint32_t nCount );
-static void                   NT35510_GPIO_Config         ( void );
-static void                   NT35510_FSMC_Config         ( void );
-static void                   NT35510_REG_Config          ( void );
-static void                   NT35510_SetCursor           ( uint16_t usX, uint16_t usY );
-static __inline void          NT35510_FillColor           ( uint32_t ulAmout_Point, uint16_t usColor );
-static uint16_t               NT35510_Read_PixelData      ( void );
-
-/**
-  * @brief  向NT35510写入命令
-  * @param  usCmd :要写入的命令（表寄存器地址）
-  * @retval 无
-  */	
- void NT35510_Write_Cmd ( uint16_t usCmd )
-{
-	* ( __IO uint16_t * ) ( FSMC_Addr_NT35510_CMD ) = usCmd;
-	
+//写寄存器函数
+//regval:寄存器值
+void LCD_WR_REG(uint16_t regval)
+{   
+	LCD->LCD_REG=regval;//写入要写的寄存器序号	 
 }
-
-
-/**
-  * @brief  向NT35510写入数据
-  * @param  usData :要写入的数据
-  * @retval 无
-  */	
- void NT35510_Write_Data ( uint16_t usData )
-{
-	* ( __IO uint16_t * ) ( FSMC_Addr_NT35510_DATA ) = usData;
-	
+//写LCD数据
+//data:要写入的值
+void LCD_WR_DATA(uint16_t data)
+{	 
+	LCD->LCD_RAM=data;		 
 }
-
-
-/**
-  * @brief  从NT35510读取数据
-  * @param  无
-  * @retval 读取到的数据
-  */	
- uint16_t NT35510_Read_Data ( void )
+//读LCD数据
+//返回值:读到的值
+uint16_t LCD_RD_DATA(void)
 {
-	return ( * ( __IO uint16_t * ) ( FSMC_Addr_NT35510_DATA ) );
-	
+	volatile uint16_t ram;			//防止被优化
+	ram=LCD->LCD_RAM;	
+	return ram;	 
+}					   
+//写寄存器
+//LCD_Reg:寄存器地址
+//LCD_RegValue:要写入的数据
+void LCD_WriteReg(uint16_t LCD_Reg,uint16_t LCD_RegValue)
+{	
+	LCD->LCD_REG = LCD_Reg;		//写入要写的寄存器序号	 
+	LCD->LCD_RAM = LCD_RegValue;//写入数据	    		 
+}	   
+//读寄存器
+//LCD_Reg:寄存器地址
+//返回值:读到的数据
+uint16_t LCD_ReadReg(uint16_t LCD_Reg)
+{										   
+	LCD_WR_REG(LCD_Reg);		//写入要读的寄存器序号
+	delay_us(5);		  
+	return LCD_RD_DATA();		//返回读到的值
+}   
+//开始写GRAM
+void LCD_WriteRAM_Prepare(void)
+{
+ 	LCD->LCD_REG=lcddev.wramcmd;	  
+}	 
+//LCD写GRAM
+//RGB_Code:颜色值
+void LCD_WriteRAM(uint16_t RGB_Code)
+{							    
+	LCD->LCD_RAM = RGB_Code;//写十六位GRAM
+}
+//从ILI93xx读出的数据为GBR格式，而我们写入的时候为RGB格式。
+//通过该函数转换
+//c:GBR格式的颜色值
+//返回值：RGB格式的颜色值
+uint16_t LCD_BGR2RGB(uint16_t c)
+{
+	uint16_t  r,g,b,rgb;   
+	b=(c>>0)&0x1f;
+	g=(c>>5)&0x3f;
+	r=(c>>11)&0x1f;	 
+	rgb=(b<<11)+(g<<5)+(r<<0);		 
+	return(rgb);
+} 
+//当mdk -O1时间优化时需要设置
+//延时i
+void opt_delay(uint8_t i)
+{
+	while(i--);
 }
 
 
@@ -101,6 +116,174 @@ static void NT35510_Delay ( __IO uint32_t nCount )
 	
 }
 
+//读取个某点的颜色值	 
+//x,y:坐标
+//返回值:此点的颜色
+uint16_t LCD_ReadPoint(uint16_t x,uint16_t y)
+{
+ 	uint16_t r=0,g=0,b=0;
+	if(x>=lcddev.width||y>=lcddev.height)return 0;	//超过了范围,直接返回		   
+    
+	LCD_SetCursor(x,y);	  
+	LCD_WR_REG(0X2E00);	//5510 发送读GRAM指令
+        
+ 	r=LCD_RD_DATA();								//dummy Read	   
+	opt_delay(2);	  
+ 	r=LCD_RD_DATA();  		  						//实际坐标颜色
+    //NT35510要分2次读出
+    opt_delay(2);	  
+    b=LCD_RD_DATA(); 
+    g=r&0XFF;		//对于5510,第一次读取的是RG的值,R在前,G在后,各占8位
+    g<<=8;
+
+    return (((r>>11)<<11)|((g>>10)<<5)|(b>>11));//NT35510需要公式转换一下
+
+}			
+//LCD开启显示
+void LCD_DisplayOn(void)
+{					   
+	LCD_WR_REG(0X2900);	//开启显示
+}	 
+//LCD关闭显示
+void LCD_DisplayOff(void)
+{	   
+    LCD_WR_REG(0X2800);	//关闭显示
+}   
+//设置光标位置
+//Xpos:横坐标
+//Ypos:纵坐标
+void LCD_SetCursor(uint16_t Xpos, uint16_t Ypos)
+{	 
+    LCD_WR_REG(lcddev.setxcmd);LCD_WR_DATA(Xpos>>8); 		
+    LCD_WR_REG(lcddev.setxcmd+1);LCD_WR_DATA(Xpos&0XFF);			 
+    LCD_WR_REG(lcddev.setycmd);LCD_WR_DATA(Ypos>>8);  		
+    LCD_WR_REG(lcddev.setycmd+1);LCD_WR_DATA(Ypos&0XFF);			
+} 		 
+//设置LCD的自动扫描方向
+//注意:其他函数可能会受到此函数设置的影响(尤其是9341/6804这两个奇葩),
+//所以,一般设置为L2R_U2D即可,如果设置为其他扫描方式,可能导致显示不正常.
+//dir:0~7,代表8个方向(具体定义见lcd.h)  
+void LCD_Scan_Dir(uint8_t dir)
+{
+	uint16_t regval=0;
+	uint16_t dirreg=0;
+	uint16_t temp;  
+
+    switch(dir)
+    {
+        case L2R_U2D://从左到右,从上到下
+            regval|=(0<<7)|(0<<6)|(0<<5); 
+            break;
+        case L2R_D2U://从左到右,从下到上
+            regval|=(1<<7)|(0<<6)|(0<<5); 
+            break;
+        case R2L_U2D://从右到左,从上到下
+            regval|=(0<<7)|(1<<6)|(0<<5); 
+            break;
+        case R2L_D2U://从右到左,从下到上
+            regval|=(1<<7)|(1<<6)|(0<<5); 
+            break;	 
+        case U2D_L2R://从上到下,从左到右
+            regval|=(0<<7)|(0<<6)|(1<<5); 
+            break;
+        case U2D_R2L://从上到下,从右到左
+            regval|=(0<<7)|(1<<6)|(1<<5); 
+            break;
+        case D2U_L2R://从下到上,从左到右
+            regval|=(1<<7)|(0<<6)|(1<<5); 
+            break;
+        case D2U_R2L://从下到上,从右到左
+            regval|=(1<<7)|(1<<6)|(1<<5); 
+            break;	 
+    }
+	dirreg=0X3600;
+    LCD_WriteReg(dirreg,regval);
+
+    LCD_WR_REG(lcddev.setxcmd);LCD_WR_DATA(0); 
+    LCD_WR_REG(lcddev.setxcmd+1);LCD_WR_DATA(0); 
+    LCD_WR_REG(lcddev.setxcmd+2);LCD_WR_DATA((lcddev.width-1)>>8); 
+    LCD_WR_REG(lcddev.setxcmd+3);LCD_WR_DATA((lcddev.width-1)&0XFF); 
+    LCD_WR_REG(lcddev.setycmd);LCD_WR_DATA(0); 
+    LCD_WR_REG(lcddev.setycmd+1);LCD_WR_DATA(0); 
+    LCD_WR_REG(lcddev.setycmd+2);LCD_WR_DATA((lcddev.height-1)>>8); 
+    LCD_WR_REG(lcddev.setycmd+3);LCD_WR_DATA((lcddev.height-1)&0XFF);
+}     
+//画点
+//x,y:坐标
+//POINT_COLOR:此点的颜色
+void LCD_DrawPoint(uint16_t x,uint16_t y)
+{
+	LCD_SetCursor(x,y);		//设置光标位置 
+	LCD_WriteRAM_Prepare();	//开始写入GRAM
+	LCD->LCD_RAM=POINT_COLOR; 
+}
+//快速画点
+//x,y:坐标
+//color:颜色
+void LCD_Fast_DrawPoint(uint16_t x,uint16_t y,uint16_t color)
+{	   
+    LCD_WR_REG(lcddev.setxcmd);LCD_WR_DATA(x>>8);  
+    LCD_WR_REG(lcddev.setxcmd+1);LCD_WR_DATA(x&0XFF);	  
+    LCD_WR_REG(lcddev.setycmd);LCD_WR_DATA(y>>8);  
+    LCD_WR_REG(lcddev.setycmd+1);LCD_WR_DATA(y&0XFF); 
+		 
+	LCD->LCD_REG=lcddev.wramcmd; 
+	LCD->LCD_RAM=color; 
+}	 
+
+//设置LCD显示方向
+//dir:0,竖屏；1,横屏
+void LCD_Display_Dir(uint8_t dir)
+{
+	if(dir==0)			//竖屏
+	{
+		lcddev.dir=0;	//竖屏
+        lcddev.wramcmd=LCD_WRAMCMD;
+        lcddev.setxcmd=LCD_SETXCMD;
+        lcddev.setycmd=LCD_SETYCMD; 
+        lcddev.width=LCD_WIDTH;
+        lcddev.height=LCD_HEIGHT;
+	}else 				//横屏
+	{	  				
+		lcddev.dir=1;	//横屏
+        lcddev.wramcmd=LCD_WRAMCMD;
+        lcddev.setxcmd=LCD_SETXCMD;
+        lcddev.setycmd=LCD_SETYCMD; 
+        lcddev.width=LCD_HEIGHT;
+        lcddev.height=LCD_WIDTH;
+	} 
+	LCD_Scan_Dir(DFT_SCAN_DIR);	//默认扫描方向
+}	 
+//设置窗口,并自动设置画点坐标到窗口左上角(sx,sy).
+//sx,sy:窗口起始坐标(左上角)
+//width,height:窗口宽度和高度,必须大于0!!
+//窗体大小:width*height. 
+void LCD_Set_Window(uint16_t sx,uint16_t sy,uint16_t width,uint16_t height)
+{    
+	uint8_t hsareg,heareg,vsareg,veareg;
+	uint16_t hsaval,heaval,vsaval,veaval; 
+	uint16_t twidth,theight;
+	twidth=sx+width-1;
+	theight=sy+height-1;
+
+    LCD_WR_REG(lcddev.setxcmd);LCD_WR_DATA(sx>>8);  
+    LCD_WR_REG(lcddev.setxcmd+1);LCD_WR_DATA(sx&0XFF);	  
+    LCD_WR_REG(lcddev.setxcmd+2);LCD_WR_DATA(twidth>>8);   
+    LCD_WR_REG(lcddev.setxcmd+3);LCD_WR_DATA(twidth&0XFF);   
+    LCD_WR_REG(lcddev.setycmd);LCD_WR_DATA(sy>>8);   
+    LCD_WR_REG(lcddev.setycmd+1);LCD_WR_DATA(sy&0XFF);  
+    LCD_WR_REG(lcddev.setycmd+2);LCD_WR_DATA(theight>>8);   
+    LCD_WR_REG(lcddev.setycmd+3);LCD_WR_DATA(theight&0XFF);  
+
+    hsareg=0X50;heareg=0X51;//水平方向窗口寄存器
+    vsareg=0X52;veareg=0X53;//垂直方向窗口寄存器	   							  
+    //设置寄存器值
+    LCD_WriteReg(hsareg,hsaval);
+    LCD_WriteReg(heareg,heaval);
+    LCD_WriteReg(vsareg,vsaval);
+    LCD_WriteReg(veareg,veaval);		
+    LCD_SetCursor(sx,sy);	//设置光标位置
+}
 
 /**
   * @brief  初始化NT35510的IO引脚
@@ -192,7 +375,6 @@ static void NT35510_FSMC_Config ( void )
 	SRAM_Handler.Init.WriteBurst=FSMC_WRITE_BURST_DISABLE;           	  //禁止突发写
   
   /* SRAM controller initialization */
-//   NT35510_GPIO_Config();
   HAL_SRAM_Init(& SRAM_Handler, &readWriteTiming, &writeTiming);
 		
 }
@@ -205,475 +387,422 @@ static void NT35510_FSMC_Config ( void )
  */
 static void NT35510_REG_Config ( void )
 {	
-  ///NT35510-HSD43
-  //PAGE1
-  NT35510_Write_Cmd(0xF000);    NT35510_Write_Data(0x0055);
-  NT35510_Write_Cmd(0xF001);    NT35510_Write_Data(0x00AA);
-  NT35510_Write_Cmd(0xF002);    NT35510_Write_Data(0x0052);
-  NT35510_Write_Cmd(0xF003);    NT35510_Write_Data(0x0008);
-  NT35510_Write_Cmd(0xF004);    NT35510_Write_Data(0x0001);
+        LCD_WriteReg(0xF000,0x55);
+		LCD_WriteReg(0xF001,0xAA);
+		LCD_WriteReg(0xF002,0x52);
+		LCD_WriteReg(0xF003,0x08);
+		LCD_WriteReg(0xF004,0x01);
+		//AVDD Set AVDD 5.2V
+		LCD_WriteReg(0xB000,0x0D);
+		LCD_WriteReg(0xB001,0x0D);
+		LCD_WriteReg(0xB002,0x0D);
+		//AVDD ratio
+		LCD_WriteReg(0xB600,0x34);
+		LCD_WriteReg(0xB601,0x34);
+		LCD_WriteReg(0xB602,0x34);
+		//AVEE -5.2V
+		LCD_WriteReg(0xB100,0x0D);
+		LCD_WriteReg(0xB101,0x0D);
+		LCD_WriteReg(0xB102,0x0D);
+		//AVEE ratio
+		LCD_WriteReg(0xB700,0x34);
+		LCD_WriteReg(0xB701,0x34);
+		LCD_WriteReg(0xB702,0x34);
+		//VCL -2.5V
+		LCD_WriteReg(0xB200,0x00);
+		LCD_WriteReg(0xB201,0x00);
+		LCD_WriteReg(0xB202,0x00);
+		//VCL ratio
+		LCD_WriteReg(0xB800,0x24);
+		LCD_WriteReg(0xB801,0x24);
+		LCD_WriteReg(0xB802,0x24);
+		//VGH 15V (Free pump)
+		LCD_WriteReg(0xBF00,0x01);
+		LCD_WriteReg(0xB300,0x0F);
+		LCD_WriteReg(0xB301,0x0F);
+		LCD_WriteReg(0xB302,0x0F);
+		//VGH ratio
+		LCD_WriteReg(0xB900,0x34);
+		LCD_WriteReg(0xB901,0x34);
+		LCD_WriteReg(0xB902,0x34);
+		//VGL_REG -10V
+		LCD_WriteReg(0xB500,0x08);
+		LCD_WriteReg(0xB501,0x08);
+		LCD_WriteReg(0xB502,0x08);
+		LCD_WriteReg(0xC200,0x03);
+		//VGLX ratio
+		LCD_WriteReg(0xBA00,0x24);
+		LCD_WriteReg(0xBA01,0x24);
+		LCD_WriteReg(0xBA02,0x24);
+		//VGMP/VGSP 4.5V/0V
+		LCD_WriteReg(0xBC00,0x00);
+		LCD_WriteReg(0xBC01,0x78);
+		LCD_WriteReg(0xBC02,0x00);
+		//VGMN/VGSN -4.5V/0V
+		LCD_WriteReg(0xBD00,0x00);
+		LCD_WriteReg(0xBD01,0x78);
+		LCD_WriteReg(0xBD02,0x00);
+		//VCOM
+		LCD_WriteReg(0xBE00,0x00);
+		LCD_WriteReg(0xBE01,0x64);
+		//Gamma Setting
+		LCD_WriteReg(0xD100,0x00);
+		LCD_WriteReg(0xD101,0x33);
+		LCD_WriteReg(0xD102,0x00);
+		LCD_WriteReg(0xD103,0x34);
+		LCD_WriteReg(0xD104,0x00);
+		LCD_WriteReg(0xD105,0x3A);
+		LCD_WriteReg(0xD106,0x00);
+		LCD_WriteReg(0xD107,0x4A);
+		LCD_WriteReg(0xD108,0x00);
+		LCD_WriteReg(0xD109,0x5C);
+		LCD_WriteReg(0xD10A,0x00);
+		LCD_WriteReg(0xD10B,0x81);
+		LCD_WriteReg(0xD10C,0x00);
+		LCD_WriteReg(0xD10D,0xA6);
+		LCD_WriteReg(0xD10E,0x00);
+		LCD_WriteReg(0xD10F,0xE5);
+		LCD_WriteReg(0xD110,0x01);
+		LCD_WriteReg(0xD111,0x13);
+		LCD_WriteReg(0xD112,0x01);
+		LCD_WriteReg(0xD113,0x54);
+		LCD_WriteReg(0xD114,0x01);
+		LCD_WriteReg(0xD115,0x82);
+		LCD_WriteReg(0xD116,0x01);
+		LCD_WriteReg(0xD117,0xCA);
+		LCD_WriteReg(0xD118,0x02);
+		LCD_WriteReg(0xD119,0x00);
+		LCD_WriteReg(0xD11A,0x02);
+		LCD_WriteReg(0xD11B,0x01);
+		LCD_WriteReg(0xD11C,0x02);
+		LCD_WriteReg(0xD11D,0x34);
+		LCD_WriteReg(0xD11E,0x02);
+		LCD_WriteReg(0xD11F,0x67);
+		LCD_WriteReg(0xD120,0x02);
+		LCD_WriteReg(0xD121,0x84);
+		LCD_WriteReg(0xD122,0x02);
+		LCD_WriteReg(0xD123,0xA4);
+		LCD_WriteReg(0xD124,0x02);
+		LCD_WriteReg(0xD125,0xB7);
+		LCD_WriteReg(0xD126,0x02);
+		LCD_WriteReg(0xD127,0xCF);
+		LCD_WriteReg(0xD128,0x02);
+		LCD_WriteReg(0xD129,0xDE);
+		LCD_WriteReg(0xD12A,0x02);
+		LCD_WriteReg(0xD12B,0xF2);
+		LCD_WriteReg(0xD12C,0x02);
+		LCD_WriteReg(0xD12D,0xFE);
+		LCD_WriteReg(0xD12E,0x03);
+		LCD_WriteReg(0xD12F,0x10);
+		LCD_WriteReg(0xD130,0x03);
+		LCD_WriteReg(0xD131,0x33);
+		LCD_WriteReg(0xD132,0x03);
+		LCD_WriteReg(0xD133,0x6D);
+		LCD_WriteReg(0xD200,0x00);
+		LCD_WriteReg(0xD201,0x33);
+		LCD_WriteReg(0xD202,0x00);
+		LCD_WriteReg(0xD203,0x34);
+		LCD_WriteReg(0xD204,0x00);
+		LCD_WriteReg(0xD205,0x3A);
+		LCD_WriteReg(0xD206,0x00);
+		LCD_WriteReg(0xD207,0x4A);
+		LCD_WriteReg(0xD208,0x00);
+		LCD_WriteReg(0xD209,0x5C);
+		LCD_WriteReg(0xD20A,0x00);
 
-  //Set AVDD 5.2V
-  NT35510_Write_Cmd(0xB000);    NT35510_Write_Data(0x000D);
-  NT35510_Write_Cmd(0xB001);    NT35510_Write_Data(0x000D);
-  NT35510_Write_Cmd(0xB002);    NT35510_Write_Data(0x000D);
+		LCD_WriteReg(0xD20B,0x81);
+		LCD_WriteReg(0xD20C,0x00);
+		LCD_WriteReg(0xD20D,0xA6);
+		LCD_WriteReg(0xD20E,0x00);
+		LCD_WriteReg(0xD20F,0xE5);
+		LCD_WriteReg(0xD210,0x01);
+		LCD_WriteReg(0xD211,0x13);
+		LCD_WriteReg(0xD212,0x01);
+		LCD_WriteReg(0xD213,0x54);
+		LCD_WriteReg(0xD214,0x01);
+		LCD_WriteReg(0xD215,0x82);
+		LCD_WriteReg(0xD216,0x01);
+		LCD_WriteReg(0xD217,0xCA);
+		LCD_WriteReg(0xD218,0x02);
+		LCD_WriteReg(0xD219,0x00);
+		LCD_WriteReg(0xD21A,0x02);
+		LCD_WriteReg(0xD21B,0x01);
+		LCD_WriteReg(0xD21C,0x02);
+		LCD_WriteReg(0xD21D,0x34);
+		LCD_WriteReg(0xD21E,0x02);
+		LCD_WriteReg(0xD21F,0x67);
+		LCD_WriteReg(0xD220,0x02);
+		LCD_WriteReg(0xD221,0x84);
+		LCD_WriteReg(0xD222,0x02);
+		LCD_WriteReg(0xD223,0xA4);
+		LCD_WriteReg(0xD224,0x02);
+		LCD_WriteReg(0xD225,0xB7);
+		LCD_WriteReg(0xD226,0x02);
+		LCD_WriteReg(0xD227,0xCF);
+		LCD_WriteReg(0xD228,0x02);
+		LCD_WriteReg(0xD229,0xDE);
+		LCD_WriteReg(0xD22A,0x02);
+		LCD_WriteReg(0xD22B,0xF2);
+		LCD_WriteReg(0xD22C,0x02);
+		LCD_WriteReg(0xD22D,0xFE);
+		LCD_WriteReg(0xD22E,0x03);
+		LCD_WriteReg(0xD22F,0x10);
+		LCD_WriteReg(0xD230,0x03);
+		LCD_WriteReg(0xD231,0x33);
+		LCD_WriteReg(0xD232,0x03);
+		LCD_WriteReg(0xD233,0x6D);
+		LCD_WriteReg(0xD300,0x00);
+		LCD_WriteReg(0xD301,0x33);
+		LCD_WriteReg(0xD302,0x00);
+		LCD_WriteReg(0xD303,0x34);
+		LCD_WriteReg(0xD304,0x00);
+		LCD_WriteReg(0xD305,0x3A);
+		LCD_WriteReg(0xD306,0x00);
+		LCD_WriteReg(0xD307,0x4A);
+		LCD_WriteReg(0xD308,0x00);
+		LCD_WriteReg(0xD309,0x5C);
+		LCD_WriteReg(0xD30A,0x00);
 
-  //Set AVEE 5.2V
-  NT35510_Write_Cmd(0xB100);    NT35510_Write_Data(0x000D);
-  NT35510_Write_Cmd(0xB101);    NT35510_Write_Data(0x000D);
-  NT35510_Write_Cmd(0xB102);    NT35510_Write_Data(0x000D);
+		LCD_WriteReg(0xD30B,0x81);
+		LCD_WriteReg(0xD30C,0x00);
+		LCD_WriteReg(0xD30D,0xA6);
+		LCD_WriteReg(0xD30E,0x00);
+		LCD_WriteReg(0xD30F,0xE5);
+		LCD_WriteReg(0xD310,0x01);
+		LCD_WriteReg(0xD311,0x13);
+		LCD_WriteReg(0xD312,0x01);
+		LCD_WriteReg(0xD313,0x54);
+		LCD_WriteReg(0xD314,0x01);
+		LCD_WriteReg(0xD315,0x82);
+		LCD_WriteReg(0xD316,0x01);
+		LCD_WriteReg(0xD317,0xCA);
+		LCD_WriteReg(0xD318,0x02);
+		LCD_WriteReg(0xD319,0x00);
+		LCD_WriteReg(0xD31A,0x02);
+		LCD_WriteReg(0xD31B,0x01);
+		LCD_WriteReg(0xD31C,0x02);
+		LCD_WriteReg(0xD31D,0x34);
+		LCD_WriteReg(0xD31E,0x02);
+		LCD_WriteReg(0xD31F,0x67);
+		LCD_WriteReg(0xD320,0x02);
+		LCD_WriteReg(0xD321,0x84);
+		LCD_WriteReg(0xD322,0x02);
+		LCD_WriteReg(0xD323,0xA4);
+		LCD_WriteReg(0xD324,0x02);
+		LCD_WriteReg(0xD325,0xB7);
+		LCD_WriteReg(0xD326,0x02);
+		LCD_WriteReg(0xD327,0xCF);
+		LCD_WriteReg(0xD328,0x02);
+		LCD_WriteReg(0xD329,0xDE);
+		LCD_WriteReg(0xD32A,0x02);
+		LCD_WriteReg(0xD32B,0xF2);
+		LCD_WriteReg(0xD32C,0x02);
+		LCD_WriteReg(0xD32D,0xFE);
+		LCD_WriteReg(0xD32E,0x03);
+		LCD_WriteReg(0xD32F,0x10);
+		LCD_WriteReg(0xD330,0x03);
+		LCD_WriteReg(0xD331,0x33);
+		LCD_WriteReg(0xD332,0x03);
+		LCD_WriteReg(0xD333,0x6D);
+		LCD_WriteReg(0xD400,0x00);
+		LCD_WriteReg(0xD401,0x33);
+		LCD_WriteReg(0xD402,0x00);
+		LCD_WriteReg(0xD403,0x34);
+		LCD_WriteReg(0xD404,0x00);
+		LCD_WriteReg(0xD405,0x3A);
+		LCD_WriteReg(0xD406,0x00);
+		LCD_WriteReg(0xD407,0x4A);
+		LCD_WriteReg(0xD408,0x00);
+		LCD_WriteReg(0xD409,0x5C);
+		LCD_WriteReg(0xD40A,0x00);
+		LCD_WriteReg(0xD40B,0x81);
 
-  //Set VCL -2.5V
-  NT35510_Write_Cmd(0xB200);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xB201);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xB202);    NT35510_Write_Data(0x0000);				
+		LCD_WriteReg(0xD40C,0x00);
+		LCD_WriteReg(0xD40D,0xA6);
+		LCD_WriteReg(0xD40E,0x00);
+		LCD_WriteReg(0xD40F,0xE5);
+		LCD_WriteReg(0xD410,0x01);
+		LCD_WriteReg(0xD411,0x13);
+		LCD_WriteReg(0xD412,0x01);
+		LCD_WriteReg(0xD413,0x54);
+		LCD_WriteReg(0xD414,0x01);
+		LCD_WriteReg(0xD415,0x82);
+		LCD_WriteReg(0xD416,0x01);
+		LCD_WriteReg(0xD417,0xCA);
+		LCD_WriteReg(0xD418,0x02);
+		LCD_WriteReg(0xD419,0x00);
+		LCD_WriteReg(0xD41A,0x02);
+		LCD_WriteReg(0xD41B,0x01);
+		LCD_WriteReg(0xD41C,0x02);
+		LCD_WriteReg(0xD41D,0x34);
+		LCD_WriteReg(0xD41E,0x02);
+		LCD_WriteReg(0xD41F,0x67);
+		LCD_WriteReg(0xD420,0x02);
+		LCD_WriteReg(0xD421,0x84);
+		LCD_WriteReg(0xD422,0x02);
+		LCD_WriteReg(0xD423,0xA4);
+		LCD_WriteReg(0xD424,0x02);
+		LCD_WriteReg(0xD425,0xB7);
+		LCD_WriteReg(0xD426,0x02);
+		LCD_WriteReg(0xD427,0xCF);
+		LCD_WriteReg(0xD428,0x02);
+		LCD_WriteReg(0xD429,0xDE);
+		LCD_WriteReg(0xD42A,0x02);
+		LCD_WriteReg(0xD42B,0xF2);
+		LCD_WriteReg(0xD42C,0x02);
+		LCD_WriteReg(0xD42D,0xFE);
+		LCD_WriteReg(0xD42E,0x03);
+		LCD_WriteReg(0xD42F,0x10);
+		LCD_WriteReg(0xD430,0x03);
+		LCD_WriteReg(0xD431,0x33);
+		LCD_WriteReg(0xD432,0x03);
+		LCD_WriteReg(0xD433,0x6D);
+		LCD_WriteReg(0xD500,0x00);
+		LCD_WriteReg(0xD501,0x33);
+		LCD_WriteReg(0xD502,0x00);
+		LCD_WriteReg(0xD503,0x34);
+		LCD_WriteReg(0xD504,0x00);
+		LCD_WriteReg(0xD505,0x3A);
+		LCD_WriteReg(0xD506,0x00);
+		LCD_WriteReg(0xD507,0x4A);
+		LCD_WriteReg(0xD508,0x00);
+		LCD_WriteReg(0xD509,0x5C);
+		LCD_WriteReg(0xD50A,0x00);
+		LCD_WriteReg(0xD50B,0x81);
 
-  //Set AVDD Ratio
-  NT35510_Write_Cmd(0xB600);    NT35510_Write_Data(0x0044);
-  NT35510_Write_Cmd(0xB601);    NT35510_Write_Data(0x0044);
-  NT35510_Write_Cmd(0xB602);    NT35510_Write_Data(0x0044);
+		LCD_WriteReg(0xD50C,0x00);
+		LCD_WriteReg(0xD50D,0xA6);
+		LCD_WriteReg(0xD50E,0x00);
+		LCD_WriteReg(0xD50F,0xE5);
+		LCD_WriteReg(0xD510,0x01);
+		LCD_WriteReg(0xD511,0x13);
+		LCD_WriteReg(0xD512,0x01);
+		LCD_WriteReg(0xD513,0x54);
+		LCD_WriteReg(0xD514,0x01);
+		LCD_WriteReg(0xD515,0x82);
+		LCD_WriteReg(0xD516,0x01);
+		LCD_WriteReg(0xD517,0xCA);
+		LCD_WriteReg(0xD518,0x02);
+		LCD_WriteReg(0xD519,0x00);
+		LCD_WriteReg(0xD51A,0x02);
+		LCD_WriteReg(0xD51B,0x01);
+		LCD_WriteReg(0xD51C,0x02);
+		LCD_WriteReg(0xD51D,0x34);
+		LCD_WriteReg(0xD51E,0x02);
+		LCD_WriteReg(0xD51F,0x67);
+		LCD_WriteReg(0xD520,0x02);
+		LCD_WriteReg(0xD521,0x84);
+		LCD_WriteReg(0xD522,0x02);
+		LCD_WriteReg(0xD523,0xA4);
+		LCD_WriteReg(0xD524,0x02);
+		LCD_WriteReg(0xD525,0xB7);
+		LCD_WriteReg(0xD526,0x02);
+		LCD_WriteReg(0xD527,0xCF);
+		LCD_WriteReg(0xD528,0x02);
+		LCD_WriteReg(0xD529,0xDE);
+		LCD_WriteReg(0xD52A,0x02);
+		LCD_WriteReg(0xD52B,0xF2);
+		LCD_WriteReg(0xD52C,0x02);
+		LCD_WriteReg(0xD52D,0xFE);
+		LCD_WriteReg(0xD52E,0x03);
+		LCD_WriteReg(0xD52F,0x10);
+		LCD_WriteReg(0xD530,0x03);
+		LCD_WriteReg(0xD531,0x33);
+		LCD_WriteReg(0xD532,0x03);
+		LCD_WriteReg(0xD533,0x6D);
+		LCD_WriteReg(0xD600,0x00);
+		LCD_WriteReg(0xD601,0x33);
+		LCD_WriteReg(0xD602,0x00);
+		LCD_WriteReg(0xD603,0x34);
+		LCD_WriteReg(0xD604,0x00);
+		LCD_WriteReg(0xD605,0x3A);
+		LCD_WriteReg(0xD606,0x00);
+		LCD_WriteReg(0xD607,0x4A);
+		LCD_WriteReg(0xD608,0x00);
+		LCD_WriteReg(0xD609,0x5C);
+		LCD_WriteReg(0xD60A,0x00);
+		LCD_WriteReg(0xD60B,0x81);
 
-  //Set AVEE Ratio
-  NT35510_Write_Cmd(0xB700);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB701);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB702);    NT35510_Write_Data(0x0034);
+		LCD_WriteReg(0xD60C,0x00);
+		LCD_WriteReg(0xD60D,0xA6);
+		LCD_WriteReg(0xD60E,0x00);
+		LCD_WriteReg(0xD60F,0xE5);
+		LCD_WriteReg(0xD610,0x01);
+		LCD_WriteReg(0xD611,0x13);
+		LCD_WriteReg(0xD612,0x01);
+		LCD_WriteReg(0xD613,0x54);
+		LCD_WriteReg(0xD614,0x01);
+		LCD_WriteReg(0xD615,0x82);
+		LCD_WriteReg(0xD616,0x01);
+		LCD_WriteReg(0xD617,0xCA);
+		LCD_WriteReg(0xD618,0x02);
+		LCD_WriteReg(0xD619,0x00);
+		LCD_WriteReg(0xD61A,0x02);
+		LCD_WriteReg(0xD61B,0x01);
+		LCD_WriteReg(0xD61C,0x02);
+		LCD_WriteReg(0xD61D,0x34);
+		LCD_WriteReg(0xD61E,0x02);
+		LCD_WriteReg(0xD61F,0x67);
+		LCD_WriteReg(0xD620,0x02);
+		LCD_WriteReg(0xD621,0x84);
+		LCD_WriteReg(0xD622,0x02);
+		LCD_WriteReg(0xD623,0xA4);
+		LCD_WriteReg(0xD624,0x02);
+		LCD_WriteReg(0xD625,0xB7);
+		LCD_WriteReg(0xD626,0x02);
+		LCD_WriteReg(0xD627,0xCF);
+		LCD_WriteReg(0xD628,0x02);
+		LCD_WriteReg(0xD629,0xDE);
+		LCD_WriteReg(0xD62A,0x02);
+		LCD_WriteReg(0xD62B,0xF2);
+		LCD_WriteReg(0xD62C,0x02);
+		LCD_WriteReg(0xD62D,0xFE);
+		LCD_WriteReg(0xD62E,0x03);
+		LCD_WriteReg(0xD62F,0x10);
+		LCD_WriteReg(0xD630,0x03);
+		LCD_WriteReg(0xD631,0x33);
+		LCD_WriteReg(0xD632,0x03);
+		LCD_WriteReg(0xD633,0x6D);
+		//LV2 Page 0 enable
+		LCD_WriteReg(0xF000,0x55);
+		LCD_WriteReg(0xF001,0xAA);
+		LCD_WriteReg(0xF002,0x52);
+		LCD_WriteReg(0xF003,0x08);
+		LCD_WriteReg(0xF004,0x00);
+		//Display control
+		LCD_WriteReg(0xB100, 0xCC);
+		LCD_WriteReg(0xB101, 0x00);
+		//Source hold time
+		LCD_WriteReg(0xB600,0x05);
+		//Gate EQ control
+		LCD_WriteReg(0xB700,0x70);
+		LCD_WriteReg(0xB701,0x70);
+		//Source EQ control (Mode 2)
+		LCD_WriteReg(0xB800,0x01);
+		LCD_WriteReg(0xB801,0x03);
+		LCD_WriteReg(0xB802,0x03);
+		LCD_WriteReg(0xB803,0x03);
+		//Inversion mode (2-dot)
+		LCD_WriteReg(0xBC00,0x02);
+		LCD_WriteReg(0xBC01,0x00);
+		LCD_WriteReg(0xBC02,0x00);
+		//Timing control 4H w/ 4-delay
+		LCD_WriteReg(0xC900,0xD0);
+		LCD_WriteReg(0xC901,0x02);
+		LCD_WriteReg(0xC902,0x50);
+		LCD_WriteReg(0xC903,0x50);
+		LCD_WriteReg(0xC904,0x50);
+		LCD_WriteReg(0x3500,0x00);
+		LCD_WriteReg(0x3A00,0x55);  //16-bit/pixel
+		LCD_WR_REG(0x1100);
+		HAL_Delay(1);
+		LCD_WR_REG(0x2900);
+}
 
-  //Set VCL -2.5V
-  NT35510_Write_Cmd(0xB800);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB801);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB802);    NT35510_Write_Data(0x0034);
-        
-  //Control VGH booster voltage rang
-  NT35510_Write_Cmd(0xBF00);    NT35510_Write_Data(0x0001); //VGH:7~18V	
-
-  //VGH=15V(1V/step)	Free pump
-  NT35510_Write_Cmd(0xB300);    NT35510_Write_Data(0x000f);		//08
-  NT35510_Write_Cmd(0xB301);    NT35510_Write_Data(0x000f);		//08
-  NT35510_Write_Cmd(0xB302);    NT35510_Write_Data(0x000f);		//08
-
-  //VGH Ratio
-  NT35510_Write_Cmd(0xB900);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB901);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xB902);    NT35510_Write_Data(0x0034);
-
-  //VGL_REG=-10(1V/step)
-  NT35510_Write_Cmd(0xB500);    NT35510_Write_Data(0x0008);
-  NT35510_Write_Cmd(0xB501);    NT35510_Write_Data(0x0008);
-  NT35510_Write_Cmd(0xB502);    NT35510_Write_Data(0x0008);
-
-  NT35510_Write_Cmd(0xC200);    NT35510_Write_Data(0x0003);
-
-  //VGLX Ratio
-  NT35510_Write_Cmd(0xBA00);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xBA01);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xBA02);    NT35510_Write_Data(0x0034);
-
-    //VGMP/VGSP=4.5V/0V
-  NT35510_Write_Cmd(0xBC00);    NT35510_Write_Data(0x0000);		//00
-  NT35510_Write_Cmd(0xBC01);    NT35510_Write_Data(0x0078);		//C8 =5.5V/90=4.8V
-  NT35510_Write_Cmd(0xBC02);    NT35510_Write_Data(0x0000);		//01
-
-  //VGMN/VGSN=-4.5V/0V
-  NT35510_Write_Cmd(0xBD00);    NT35510_Write_Data(0x0000); //00
-  NT35510_Write_Cmd(0xBD01);    NT35510_Write_Data(0x0078); //90
-  NT35510_Write_Cmd(0xBD02);    NT35510_Write_Data(0x0000);
-
-  //Vcom=-1.4V(12.5mV/step)
-  NT35510_Write_Cmd(0xBE00);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xBE01);    NT35510_Write_Data(0x0064); //HSD:64;Novatek:50=-1.0V, 80  5f
-
-  //Gamma (R+)
-  NT35510_Write_Cmd(0xD100);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD101);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD102);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD103);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD104);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD105);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD106);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD107);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD108);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD109);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD10A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD10B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD10C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD10D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD10E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD10F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD110);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD111);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD112);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD113);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD114);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD115);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD116);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD117);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD118);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD119);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD11A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD11B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD11C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD11D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD11E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD11F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD120);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD121);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD122);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD123);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD124);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD125);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD126);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD127);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD128);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD129);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD12A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD12B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD12C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD12D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD12E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD12F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD130);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD131);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD132);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD133);    NT35510_Write_Data(0x006D);
-
-  //Gamma (G+)
-  NT35510_Write_Cmd(0xD200);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD201);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD202);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD203);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD204);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD205);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD206);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD207);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD208);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD209);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD20A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD20B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD20C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD20D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD20E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD20F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD210);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD211);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD212);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD213);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD214);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD215);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD216);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD217);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD218);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD219);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD21A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD21B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD21C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD21D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD21E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD21F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD220);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD221);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD222);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD223);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD224);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD225);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD226);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD227);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD228);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD229);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD22A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD22B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD22C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD22D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD22E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD22F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD230);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD231);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD232);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD233);    NT35510_Write_Data(0x006D);
-
-  //Gamma (B+)
-  NT35510_Write_Cmd(0xD300);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD301);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD302);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD303);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD304);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD305);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD306);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD307);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD308);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD309);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD30A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD30B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD30C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD30D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD30E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD30F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD310);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD311);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD312);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD313);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD314);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD315);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD316);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD317);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD318);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD319);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD31A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD31B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD31C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD31D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD31E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD31F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD320);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD321);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD322);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD323);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD324);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD325);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD326);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD327);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD328);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD329);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD32A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD32B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD32C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD32D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD32E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD32F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD330);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD331);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD332);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD333);    NT35510_Write_Data(0x006D);
-
-  //Gamma (R-)
-  NT35510_Write_Cmd(0xD400);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD401);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD402);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD403);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD404);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD405);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD406);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD407);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD408);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD409);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD40A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD40B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD40C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD40D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD40E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD40F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD410);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD411);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD412);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD413);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD414);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD415);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD416);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD417);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD418);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD419);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD41A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD41B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD41C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD41D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD41E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD41F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD420);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD421);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD422);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD423);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD424);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD425);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD426);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD427);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD428);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD429);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD42A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD42B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD42C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD42D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD42E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD42F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD430);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD431);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD432);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD433);    NT35510_Write_Data(0x006D);
-
-  //Gamma (G-)
-  NT35510_Write_Cmd(0xD500);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD501);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD502);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD503);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD504);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD505);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD506);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD507);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD508);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD509);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD50A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD50B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD50C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD50D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD50E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD50F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD510);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD511);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD512);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD513);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD514);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD515);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD516);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD517);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD518);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD519);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD51A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD51B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD51C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD51D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD51E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD51F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD520);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD521);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD522);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD523);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD524);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD525);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD526);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD527);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD528);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD529);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD52A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD52B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD52C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD52D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD52E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD52F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD530);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD531);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD532);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD533);    NT35510_Write_Data(0x006D);
-
-  //Gamma (B-)
-  NT35510_Write_Cmd(0xD600);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD601);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD602);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD603);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD604);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD605);    NT35510_Write_Data(0x003A);
-  NT35510_Write_Cmd(0xD606);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD607);    NT35510_Write_Data(0x004A);
-  NT35510_Write_Cmd(0xD608);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD609);    NT35510_Write_Data(0x005C);
-  NT35510_Write_Cmd(0xD60A);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD60B);    NT35510_Write_Data(0x0081);
-  NT35510_Write_Cmd(0xD60C);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD60D);    NT35510_Write_Data(0x00A6);
-  NT35510_Write_Cmd(0xD60E);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD60F);    NT35510_Write_Data(0x00E5);
-  NT35510_Write_Cmd(0xD610);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD611);    NT35510_Write_Data(0x0013);
-  NT35510_Write_Cmd(0xD612);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD613);    NT35510_Write_Data(0x0054);
-  NT35510_Write_Cmd(0xD614);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD615);    NT35510_Write_Data(0x0082);
-  NT35510_Write_Cmd(0xD616);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD617);    NT35510_Write_Data(0x00CA);
-  NT35510_Write_Cmd(0xD618);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD619);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0xD61A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD61B);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xD61C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD61D);    NT35510_Write_Data(0x0034);
-  NT35510_Write_Cmd(0xD61E);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD61F);    NT35510_Write_Data(0x0067);
-  NT35510_Write_Cmd(0xD620);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD621);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xD622);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD623);    NT35510_Write_Data(0x00A4);
-  NT35510_Write_Cmd(0xD624);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD625);    NT35510_Write_Data(0x00B7);
-  NT35510_Write_Cmd(0xD626);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD627);    NT35510_Write_Data(0x00CF);
-  NT35510_Write_Cmd(0xD628);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD629);    NT35510_Write_Data(0x00DE);
-  NT35510_Write_Cmd(0xD62A);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD62B);    NT35510_Write_Data(0x00F2);
-  NT35510_Write_Cmd(0xD62C);    NT35510_Write_Data(0x0002);
-  NT35510_Write_Cmd(0xD62D);    NT35510_Write_Data(0x00FE);
-  NT35510_Write_Cmd(0xD62E);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD62F);    NT35510_Write_Data(0x0010);
-  NT35510_Write_Cmd(0xD630);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD631);    NT35510_Write_Data(0x0033);
-  NT35510_Write_Cmd(0xD632);    NT35510_Write_Data(0x0003);
-  NT35510_Write_Cmd(0xD633);    NT35510_Write_Data(0x006D);
-
-  //PAGE0
-  NT35510_Write_Cmd(0xF000);    NT35510_Write_Data(0x0055);
-  NT35510_Write_Cmd(0xF001);    NT35510_Write_Data(0x00AA);
-  NT35510_Write_Cmd(0xF002);    NT35510_Write_Data(0x0052);
-  NT35510_Write_Cmd(0xF003);    NT35510_Write_Data(0x0008);	
-  NT35510_Write_Cmd(0xF004);    NT35510_Write_Data(0x0000); 
-
-  //480x800
-  NT35510_Write_Cmd(0xB500);    NT35510_Write_Data(0x0050);
-
-  //NT35510_Write_Cmd(0x2C00);    NT35510_Write_Data(0x0006); //8BIT 6-6-6?
-
-  //Dispay control
-  NT35510_Write_Cmd(0xB100);    NT35510_Write_Data(0x00CC);	
-  NT35510_Write_Cmd(0xB101);    NT35510_Write_Data(0x0000); // S1->S1440:00;S1440->S1:02
-
-  //Source hold time (Nova non-used)
-  NT35510_Write_Cmd(0xB600);    NT35510_Write_Data(0x0005);
-
-  //Gate EQ control	 (Nova non-used)
-  NT35510_Write_Cmd(0xB700);    NT35510_Write_Data(0x0077);  //HSD:70;Nova:77	 
-  NT35510_Write_Cmd(0xB701);    NT35510_Write_Data(0x0077);	//HSD:70;Nova:77
-
-  //Source EQ control (Nova non-used)
-  NT35510_Write_Cmd(0xB800);    NT35510_Write_Data(0x0001);  
-  NT35510_Write_Cmd(0xB801);    NT35510_Write_Data(0x0003);	//HSD:05;Nova:07
-  NT35510_Write_Cmd(0xB802);    NT35510_Write_Data(0x0003);	//HSD:05;Nova:07
-  NT35510_Write_Cmd(0xB803);    NT35510_Write_Data(0x0003);	//HSD:05;Nova:07
-
-  //Inversion mode: column
-  NT35510_Write_Cmd(0xBC00);    NT35510_Write_Data(0x0002);	//00: column
-  NT35510_Write_Cmd(0xBC01);    NT35510_Write_Data(0x0000);	//01:1dot
-  NT35510_Write_Cmd(0xBC02);    NT35510_Write_Data(0x0000); 
-
-  //Frame rate	(Nova non-used)
-  NT35510_Write_Cmd(0xBD00);    NT35510_Write_Data(0x0001);
-  NT35510_Write_Cmd(0xBD01);    NT35510_Write_Data(0x0084);
-  NT35510_Write_Cmd(0xBD02);    NT35510_Write_Data(0x001c); //HSD:06;Nova:1C
-  NT35510_Write_Cmd(0xBD03);    NT35510_Write_Data(0x001c); //HSD:04;Nova:1C
-  NT35510_Write_Cmd(0xBD04);    NT35510_Write_Data(0x0000);
-
-  //LGD timing control(4H/4-delay_ms)
-  NT35510_Write_Cmd(0xC900);    NT35510_Write_Data(0x00D0);	//3H:0x50;4H:0xD0	 //D
-  NT35510_Write_Cmd(0xC901);    NT35510_Write_Data(0x0002);  //HSD:05;Nova:02
-  NT35510_Write_Cmd(0xC902);    NT35510_Write_Data(0x0050);	//HSD:05;Nova:50
-  NT35510_Write_Cmd(0xC903);    NT35510_Write_Data(0x0050);	//HSD:05;Nova:50	;STV delay_ms time
-  NT35510_Write_Cmd(0xC904);    NT35510_Write_Data(0x0050);	//HSD:05;Nova:50	;CLK delay_ms time
-
-  NT35510_Write_Cmd(0x3600);    NT35510_Write_Data(0x0000);
-  NT35510_Write_Cmd(0x3500);    NT35510_Write_Data(0x0000);
-
-  NT35510_Write_Cmd(0xFF00);    NT35510_Write_Data(0x00AA);
-  NT35510_Write_Cmd(0xFF01);    NT35510_Write_Data(0x0055);
-  NT35510_Write_Cmd(0xFF02);    NT35510_Write_Data(0x0025);
-  NT35510_Write_Cmd(0xFF03);    NT35510_Write_Data(0x0001);
-
-  NT35510_Write_Cmd(0xFC00);    NT35510_Write_Data(0x0016);
-  NT35510_Write_Cmd(0xFC01);    NT35510_Write_Data(0x00A2);
-  NT35510_Write_Cmd(0xFC02);    NT35510_Write_Data(0x0026);
-  NT35510_Write_Cmd(0x3A00);    NT35510_Write_Data(0x0006);
-
-  NT35510_Write_Cmd(0x3A00);    NT35510_Write_Data(0x0055);
-  //Sleep out
-  NT35510_Write_Cmd(0x1100);	   //?
-  HAL_Delay(160);
-
-  //Display on
-  NT35510_Write_Cmd(0x2900);   
+//初始化lcd
+void LCD_Init(void)
+{
+    NT35510_Init();
 }
 
 /**
@@ -683,21 +812,18 @@ static void NT35510_REG_Config ( void )
  */
 void NT35510_Init ( void )
 {
-	NT35510_GPIO_Config ();
-//	NT35510_FSMC_Config ();
-	NT35510_BackLed_Control ( ENABLE );      //点亮LCD背光灯
-
-	NT35510_Rst ();
-	NT35510_REG_Config ();
-	
-    lcddev.width=LCD_X_LENGTH;
-    lcddev.height=LCD_Y_LENGTH;
-	//设置默认扫描方向，其中 6 模式为大部分液晶例程的默认显示方向  
-	NT35510_GramScan(LCD_SCAN_MODE);
-	NT35510_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);	/* 清屏 */
+    NT35510_GPIO_Config ();
+	NT35510_FSMC_Config ();  
+    
+    HAL_Delay(50); 					// delay 50 ms 
+  	lcddev.id=LCD_ReadID();	//读ID
+    printf("LCD ID:%x\r\n",lcddev.id); //打印LCD ID   
+    NT35510_REG_Config();
+    
+    LCD_Display_Dir(0);		//默认为竖屏
+	NT35510_BackLed_Control(ENABLE);				//点亮背光
+	LCD_Clear(WHITE);
 }
-
-
 
 /**
  * @brief  NT35510G背光LED控制
@@ -711,15 +837,29 @@ void  NT35510_BackLed_Control ( FunctionalState enumState )
 {
 	if ( enumState )
   {
-    digitalH( GPIOB, GPIO_PIN_0);	
+    digitalH( LCD_LED_GPIO_PORT, LCD_LED_GPIO_PIN);	
   }
 	else
   {
-    digitalL( GPIOB, GPIO_PIN_0);
+    digitalL( LCD_LED_GPIO_PORT, LCD_LED_GPIO_PIN);
   }		
 }
 
-
+//读ID
+uint16_t LCD_ReadID()
+{
+    uint16_t lcddev_id;
+    
+    LCD_WR_REG(0XDA00);	
+    lcddev_id=LCD_RD_DATA();		//读回0X00	 
+    LCD_WR_REG(0XDB00);	
+    lcddev_id=LCD_RD_DATA();		//读回0X80
+    lcddev_id<<=8;	
+    LCD_WR_REG(0XDC00);	
+    lcddev_id|=LCD_RD_DATA();		//读回0X00		
+    if(lcddev_id==0x8000)lcddev_id=0x5510;//NT35510读回的ID是8000H,为方便区分,我们强制设置为5510   
+    return lcddev_id;	//读ID
+}
 
 /**
  * @brief  NT35510G 软件复位
@@ -742,1335 +882,267 @@ void NT35510_Rst( void )
 	
 }
 
-
-/**
- * @brief  设置NT35510的GRAM的扫描方向 
- * @param  ucOption ：选择GRAM的扫描方向 
- *     @arg 0-7 :参数可选值为0-7这八个方向
- *
- *	！！！其中0、3、5、6 模式适合从左至右显示文字，
- *				不推荐使用其它模式显示文字	其它模式显示文字会有镜像效果			
- *		
- *	其中0、2、4、6 模式的X方向像素为240，Y方向像素为320
- *	其中1、3、5、7 模式下X方向像素为320，Y方向像素为240
- *
- *	其中 6 模式为大部分液晶例程的默认显示方向
- *	其中 3 模式为摄像头例程使用的方向
- *	其中 0 模式为BMP图片显示例程使用的方向
- *
- * @retval 无
- * @note  坐标图例：A表示向上，V表示向下，<表示向左，>表示向右
-					X表示X轴，Y表示Y轴
-
-------------------------------------------------------------
-模式0：				.		模式1：		.	模式2：			.	模式3：					
-					A		.					A		.		A					.		A									
-					|		.					|		.		|					.		|							
-					Y		.					X		.		Y					.		X					
-					0		.					1		.		2					.		3					
-	<--- X0 o		.	<----Y1	o		.		o 2X--->  .		o 3Y--->	
-------------------------------------------------------------	
-模式4：				.	模式5：			.	模式6：			.	模式7：					
-	<--- X4 o		.	<--- Y5 o		.		o 6X--->  .		o 7Y--->	
-					4		.					5		.		6					.		7	
-					Y		.					X		.		Y					.		X						
-					|		.					|		.		|					.		|							
-					V		.					V		.		V					.		V		
----------------------------------------------------------				
-											 LCD屏示例
-								|-----------------|
-								|			野火Logo		|
-								|									|
-								|									|
-								|									|
-								|									|
-								|									|
-								|									|
-								|									|
-								|									|
-								|-----------------|
-								屏幕正面（宽240，高320）
-
- *******************************************************/
-void NT35510_GramScan ( uint8_t ucOption )
-{	
-	//参数检查，只可输入0-7
-	if(ucOption >7 )
-		return;
-	
-	//根据模式更新LCD_SCAN_MODE的值，主要用于触摸屏选择计算参数
-	LCD_SCAN_MODE = ucOption;
-	
-	//根据模式更新XY方向的像素宽度
-	if(ucOption%2 == 0)	
+//清屏函数
+//color:要清屏的填充色
+void LCD_Clear(uint16_t color)
+{
+	uint32_t index=0;      
+	uint32_t totalpoint=lcddev.width;
+	totalpoint*=lcddev.height; 			//得到总点数
+	if((lcddev.id==0X6804)&&(lcddev.dir==1))//6804横屏的时候特殊处理  
+	{						    
+ 		lcddev.dir=0;	 
+ 		lcddev.setxcmd=0X2A;
+		lcddev.setycmd=0X2B;  	 			
+		LCD_SetCursor(0x00,0x0000);		//设置光标位置  
+ 		lcddev.dir=1;	 
+  		lcddev.setxcmd=0X2B;
+		lcddev.setycmd=0X2A;  	 
+ 	}else LCD_SetCursor(0x00,0x0000);	//设置光标位置 
+	LCD_WriteRAM_Prepare();     		//开始写入GRAM	 	  
+	for(index=0;index<totalpoint;index++)
 	{
-		//0 2 4 6模式下X方向像素宽度为240，Y方向为320
-		LCD_X_LENGTH = NT35510_LESS_PIXEL;
-		LCD_Y_LENGTH =	NT35510_MORE_PIXEL;
+		LCD->LCD_RAM=color;	
 	}
-	else				
+}  
+//在指定区域内填充单个颜色
+//(sx,sy),(ex,ey):填充矩形对角坐标,区域大小为:(ex-sx+1)*(ey-sy+1)   
+//color:要填充的颜色
+void LCD_Fill(uint16_t sx,uint16_t sy,uint16_t ex,uint16_t ey,uint16_t color)
+{          
+	uint16_t i,j;
+	uint16_t xlen=0;
+	uint16_t temp;
+	if((lcddev.id==0X6804)&&(lcddev.dir==1))	//6804横屏的时候特殊处理  
 	{
-		//1 3 5 7模式下X方向像素宽度为320，Y方向为240
-		LCD_X_LENGTH = NT35510_MORE_PIXEL;
-		LCD_Y_LENGTH =	NT35510_LESS_PIXEL; 
-	}
-
-	//0x36命令参数的高3位可用于设置GRAM扫描方向	
-	NT35510_Write_Cmd ( 0x3600 ); 
-	NT35510_Write_Data ( 0x00 |(ucOption<<5));//根据ucOption的值设置LCD参数，共0-7种模式
-	NT35510_Write_Cmd ( CMD_SetCoordinateX ); 
-	NT35510_Write_Data ( 0x00 );		/* x 起始坐标高8位 */
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 1 ); 
-	NT35510_Write_Data ( 0x00 );		/* x 起始坐标低8位 */
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 2 ); 
-	NT35510_Write_Data ( ((LCD_X_LENGTH-1)>>8)&0xFF ); /* x 结束坐标高8位 */	
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 3 ); 
-	NT35510_Write_Data ( (LCD_X_LENGTH-1)&0xFF );				/* x 结束坐标低8位 */
-
-	NT35510_Write_Cmd ( CMD_SetCoordinateY ); 
-	NT35510_Write_Data ( 0x00 );		/* y 起始坐标高8位 */
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 1 ); 
-	NT35510_Write_Data ( 0x00 );		/* y 起始坐标低8位 */
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 2 ); 
-	NT35510_Write_Data ( ((LCD_Y_LENGTH-1)>>8)&0xFF );	/* y 结束坐标高8位 */	 
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 3 ); 
-	NT35510_Write_Data ( (LCD_Y_LENGTH-1)&0xFF );				/* y 结束坐标低8位 */
-
-	/* write gram start */
-	NT35510_Write_Cmd ( CMD_SetPixel );	
-}
-
-
-
-/**
- * @brief  在NT35510显示器上开辟一个窗口
- * @param  usX ：在特定扫描方向下窗口的起点X坐标
- * @param  usY ：在特定扫描方向下窗口的起点Y坐标
- * @param  usWidth ：窗口的宽度
- * @param  usHeight ：窗口的高度
- * @retval 无
- */
-void NT35510_OpenWindow ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight )
-{	
-	NT35510_Write_Cmd ( CMD_SetCoordinateX ); 				 /* 设置X坐标 */
-	NT35510_Write_Data ( usX >> 8  );	 /* 先高8位，然后低8位 */
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 1 ); 
-	NT35510_Write_Data ( usX & 0xff  );	 /* 设置起始点和结束点*/
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 2 );
-	NT35510_Write_Data ( ( usX + usWidth - 1 ) >> 8  );
-	NT35510_Write_Cmd ( CMD_SetCoordinateX + 3 );
-	NT35510_Write_Data ( ( usX + usWidth - 1 ) & 0xff  );
-
-	NT35510_Write_Cmd ( CMD_SetCoordinateY ); 			     /* 设置Y坐标*/
-	NT35510_Write_Data ( usY >> 8  );
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 1);
-	NT35510_Write_Data ( usY & 0xff  );
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 2);
-	NT35510_Write_Data ( ( usY + usHeight - 1 ) >> 8 );
-	NT35510_Write_Cmd ( CMD_SetCoordinateY + 3);
-	NT35510_Write_Data ( ( usY + usHeight - 1) & 0xff );
-	
-}
-
-
-/**
- * @brief  设定NT35510的光标坐标
- * @param  usX ：在特定扫描方向下光标的X坐标
- * @param  usY ：在特定扫描方向下光标的Y坐标
- * @retval 无
- */
-static void NT35510_SetCursor ( uint16_t usX, uint16_t usY )	
+		temp=sx;
+		sx=sy;
+		sy=lcddev.width-ex-1;	  
+		ex=ey;
+		ey=lcddev.width-temp-1;
+ 		lcddev.dir=0;	 
+ 		lcddev.setxcmd=0X2A;
+		lcddev.setycmd=0X2B;  	 			
+		LCD_Fill(sx,sy,ex,ey,color);  
+ 		lcddev.dir=1;	 
+  		lcddev.setxcmd=0X2B;
+		lcddev.setycmd=0X2A;  	 
+ 	}else
+	{
+		xlen=ex-sx+1;	 
+		for(i=sy;i<=ey;i++)
+		{
+		 	LCD_SetCursor(sx,i);      				//设置光标位置 
+			LCD_WriteRAM_Prepare();     			//开始写入GRAM	  
+			for(j=0;j<xlen;j++)LCD->LCD_RAM=color;	//显示颜色 	    
+		}
+	}	 
+}  
+//在指定区域内填充指定颜色块			 
+//(sx,sy),(ex,ey):填充矩形对角坐标,区域大小为:(ex-sx+1)*(ey-sy+1)   
+//color:要填充的颜色
+void LCD_Color_Fill(uint16_t sx,uint16_t sy,uint16_t ex,uint16_t ey,uint16_t *color)
+{  
+	uint16_t height,width;
+	uint16_t i,j;
+	width=ex-sx+1; 			//得到填充的宽度
+	height=ey-sy+1;			//高度
+ 	for(i=0;i<height;i++)
+	{
+ 		LCD_SetCursor(sx,sy+i);   	//设置光标位置 
+		LCD_WriteRAM_Prepare();     //开始写入GRAM
+		for(j=0;j<width;j++)LCD->LCD_RAM=color[i*width+j];//写入数据 
+	}		  
+}  
+//画线
+//x1,y1:起点坐标
+//x2,y2:终点坐标  
+void LCD_DrawLine(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
 {
-	NT35510_OpenWindow ( usX, usY, 1, 1 );
-}
-
-
-/**
- * @brief  在NT35510显示器上以某一颜色填充像素点
- * @param  ulAmout_Point ：要填充颜色的像素点的总数目
- * @param  usColor ：颜色
- * @retval 无
- */
-static __inline void NT35510_FillColor ( uint32_t ulAmout_Point, uint16_t usColor )
-{
-	uint32_t i = 0;
-	
-	
-	/* memory write */
-	NT35510_Write_Cmd ( CMD_SetPixel );	
-		
-	for ( i = 0; i < ulAmout_Point; i ++ )
-		NT35510_Write_Data ( usColor );
-		
-	
-}
-
-
-/**
- * @brief  对NT35510显示器的某一窗口以某种颜色进行清屏
- * @param  usX ：在特定扫描方向下窗口的起点X坐标
- * @param  usY ：在特定扫描方向下窗口的起点Y坐标
- * @param  usWidth ：窗口的宽度
- * @param  usHeight ：窗口的高度
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_Clear ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight )
-{
-	NT35510_OpenWindow ( usX, usY, usWidth, usHeight );
-
-	NT35510_FillColor ( usWidth * usHeight, CurrentBackColor );		
-	
-}
-
-
-/**
- * @brief  对NT35510显示器的某一点以某种颜色进行填充
- * @param  usX ：在特定扫描方向下该点的X坐标
- * @param  usY ：在特定扫描方向下该点的Y坐标
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_SetPointPixel ( uint16_t usX, uint16_t usY )	
-{	
-	if ( ( usX < LCD_X_LENGTH ) && ( usY < LCD_Y_LENGTH ) )
-  {
-		NT35510_SetCursor ( usX, usY );
-		
-		NT35510_FillColor ( 1, CurrentTextColor );
-	}
-	
-}
-
-/**
- * @brief  对NT35510显示器的某一点以某种颜色进行填充
- * @param  usX ：在特定扫描方向下该点的X坐标
- * @param  usY ：在特定扫描方向下该点的Y坐标
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DrawPoint ( uint16_t usX, uint16_t usY, uint16_t usColor )	
-{	
-	if ( ( usX < LCD_X_LENGTH ) && ( usY < LCD_Y_LENGTH ) )
-  {
-		NT35510_SetCursor ( usX, usY );
-		
-		NT35510_FillColor ( 1, usColor );
-	}
-	
-}
-
-/**
- * @brief  读取NT35510 GRAN 的一个像素数据
- * @param  无
- * @retval 像素数据
- */
-static uint16_t NT35510_Read_PixelData ( void )	
-{	
-	uint16_t usR=0, usG=0, usB=0 ;
-
-	
-	NT35510_Write_Cmd ( 0x2E );   /* 读数据 */
-	
-	usR = NT35510_Read_Data (); 	/*FIRST READ OUT DUMMY DATA*/
-	
-	usR = NT35510_Read_Data ();  	/*READ OUT RED DATA  */
-	usB = NT35510_Read_Data ();  	/*READ OUT BLUE DATA*/
-	usG = NT35510_Read_Data ();  	/*READ OUT GREEN DATA*/	
-	
-  return ( ( ( usR >> 11 ) << 11 ) | ( ( usG >> 10 ) << 5 ) | ( usB >> 11 ) );
-	
-}
-
-
-/**
- * @brief  获取 NT35510 显示器上某一个坐标点的像素数据
- * @param  usX ：在特定扫描方向下该点的X坐标
- * @param  usY ：在特定扫描方向下该点的Y坐标
- * @retval 像素数据
- */
-uint16_t NT35510_GetPointPixel ( uint16_t usX, uint16_t usY )
-{ 
-	uint16_t usPixelData;
-
-	
-	NT35510_SetCursor ( usX, usY );
-	
-	usPixelData = NT35510_Read_PixelData ();
-	
-	return usPixelData;
-	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上使用 Bresenham 算法画线段 
- * @param  usX1 ：在特定扫描方向下线段的一个端点X坐标
- * @param  usY1 ：在特定扫描方向下线段的一个端点Y坐标
- * @param  usX2 ：在特定扫描方向下线段的另一个端点X坐标
- * @param  usY2 ：在特定扫描方向下线段的另一个端点Y坐标
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DrawLine ( uint16_t usX1, uint16_t usY1, uint16_t usX2, uint16_t usY2 )
-{
-	uint16_t us; 
-	uint16_t usX_Current, usY_Current;
-	
-	int32_t lError_X = 0, lError_Y = 0, lDelta_X, lDelta_Y, lDistance; 
-	int32_t lIncrease_X, lIncrease_Y; 	
-	
-	
-	lDelta_X = usX2 - usX1; //计算坐标增量 
-	lDelta_Y = usY2 - usY1; 
-	
-	usX_Current = usX1; 
-	usY_Current = usY1; 
-	
-	
-	if ( lDelta_X > 0 ) 
-		lIncrease_X = 1; //设置单步方向 
-	
-	else if ( lDelta_X == 0 ) 
-		lIncrease_X = 0;//垂直线 
-	
-	else 
-  { 
-    lIncrease_X = -1;
-    lDelta_X = - lDelta_X;
-  } 
-
-	
-	if ( lDelta_Y > 0 )
-		lIncrease_Y = 1; 
-	
-	else if ( lDelta_Y == 0 )
-		lIncrease_Y = 0;//水平线 
-	
-	else 
-  {
-    lIncrease_Y = -1;
-    lDelta_Y = - lDelta_Y;
-  } 
-
-	
-	if (  lDelta_X > lDelta_Y )
-		lDistance = lDelta_X; //选取基本增量坐标轴 
-	
-	else 
-		lDistance = lDelta_Y; 
-
-	
-	for ( us = 0; us <= lDistance + 1; us ++ )//画线输出 
+	uint16_t t; 
+	int xerr=0,yerr=0,delta_x,delta_y,distance; 
+	int incx,incy,uRow,uCol; 
+	delta_x=x2-x1; //计算坐标增量 
+	delta_y=y2-y1; 
+	uRow=x1; 
+	uCol=y1; 
+	if(delta_x>0)incx=1; //设置单步方向 
+	else if(delta_x==0)incx=0;//垂直线 
+	else {incx=-1;delta_x=-delta_x;} 
+	if(delta_y>0)incy=1; 
+	else if(delta_y==0)incy=0;//水平线 
+	else{incy=-1;delta_y=-delta_y;} 
+	if( delta_x>delta_y)distance=delta_x; //选取基本增量坐标轴 
+	else distance=delta_y; 
+	for(t=0;t<=distance+1;t++ )//画线输出 
 	{  
-		NT35510_SetPointPixel ( usX_Current, usY_Current );//画点 
-		
-		lError_X += lDelta_X ; 
-		lError_Y += lDelta_Y ; 
-		
-		if ( lError_X > lDistance ) 
+		LCD_DrawPoint(uRow,uCol);//画点 
+		xerr+=delta_x ; 
+		yerr+=delta_y ; 
+		if(xerr>distance) 
 		{ 
-			lError_X -= lDistance; 
-			usX_Current += lIncrease_X; 
-		}  
-		
-		if ( lError_Y > lDistance ) 
-		{ 
-			lError_Y -= lDistance; 
-			usY_Current += lIncrease_Y; 
+			xerr-=distance; 
+			uRow+=incx; 
 		} 
-		
+		if(yerr>distance) 
+		{ 
+			yerr-=distance; 
+			uCol+=incy; 
+		} 
 	}  
-	
-	
+}    
+//画矩形	  
+//(x1,y1),(x2,y2):矩形的对角坐标
+void LCD_DrawRectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
+{
+	LCD_DrawLine(x1,y1,x2,y1);
+	LCD_DrawLine(x1,y1,x1,y2);
+	LCD_DrawLine(x1,y2,x2,y2);
+	LCD_DrawLine(x2,y1,x2,y2);
+}
+//在指定位置画一个指定大小的圆
+//(x,y):中心点
+//r    :半径
+void LCD_Draw_Circle(uint16_t x0,uint16_t y0,uint8_t r)
+{
+	int a,b;
+	int di;
+	a=0;b=r;	  
+	di=3-(r<<1);             //判断下个点位置的标志
+	while(a<=b)
+	{
+		LCD_DrawPoint(x0+a,y0-b);             //5
+ 		LCD_DrawPoint(x0+b,y0-a);             //0           
+		LCD_DrawPoint(x0+b,y0+a);             //4               
+		LCD_DrawPoint(x0+a,y0+b);             //6 
+		LCD_DrawPoint(x0-a,y0+b);             //1       
+ 		LCD_DrawPoint(x0-b,y0+a);             
+		LCD_DrawPoint(x0-a,y0-b);             //2             
+  		LCD_DrawPoint(x0-b,y0-a);             //7     	         
+		a++;
+		//使用Bresenham算法画圆     
+		if(di<0)di +=4*a+6;	  
+		else
+		{
+			di+=10+4*(a-b);   
+			b--;
+		} 						    
+	}
+} 									  
+//在指定位置显示一个字符
+//x,y:起始坐标
+//num:要显示的字符:" "--->"~"
+//size:字体大小 12/16/24
+//mode:叠加方式(1)还是非叠加方式(0)
+void LCD_ShowChar(uint16_t x,uint16_t y,uint8_t num,uint8_t size,uint8_t mode)
+{  							  
+    uint8_t temp,t1,t;
+	uint16_t y0=y;
+	uint8_t csize=(size/8+((size%8)?1:0))*(size/2);		//得到字体一个字符对应点阵集所占的字节数	
+ 	num=num-' ';//得到偏移后的值（ASCII字库是从空格开始取模，所以-' '就是对应字符的字库）
+	for(t=0;t<csize;t++)
+	{   
+		if(size==12)temp=asc2_1206[num][t]; 	 	//调用1206字体
+		else if(size==16)temp=asc2_1608[num][t];	//调用1608字体
+		else if(size==24)temp=asc2_2412[num][t];	//调用2412字体
+		else return;								//没有的字库
+		for(t1=0;t1<8;t1++)
+		{			    
+			if(temp&0x80)LCD_Fast_DrawPoint(x,y,POINT_COLOR);
+			else if(mode==0)LCD_Fast_DrawPoint(x,y,BACK_COLOR);
+			temp<<=1;
+			y++;
+			if(y>=lcddev.height)return;		//超区域了
+			if((y-y0)==size)
+			{
+				y=y0;
+				x++;
+				if(x>=lcddev.width)return;	//超区域了
+				break;
+			}
+		}  	 
+	}  	    	   	 	  
 }   
-
-
-/**
- * @brief  在 NT35510 显示器上画一个矩形
- * @param  usX_Start ：在特定扫描方向下矩形的起始点X坐标
- * @param  usY_Start ：在特定扫描方向下矩形的起始点Y坐标
- * @param  usWidth：矩形的宽度（单位：像素）
- * @param  usHeight：矩形的高度（单位：像素）
- * @param  ucFilled ：选择是否填充该矩形
-  *   该参数为以下值之一：
-  *     @arg 0 :空心矩形
-  *     @arg 1 :实心矩形 
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DrawRectangle ( uint16_t usX_Start, uint16_t usY_Start, uint16_t usWidth, uint16_t usHeight, uint8_t ucFilled )
+//m^n函数
+//返回值:m^n次方.
+uint32_t LCD_Pow(uint8_t m,uint8_t n)
 {
-	if ( ucFilled )
+	uint32_t result=1;	 
+	while(n--)result*=m;    
+	return result;
+}			 
+//显示数字,高位为0,则不显示
+//x,y :起点坐标	 
+//len :数字的位数
+//size:字体大小
+//color:颜色 
+//num:数值(0~4294967295);	 
+void LCD_ShowNum(uint16_t x,uint16_t y,uint32_t num,uint8_t len,uint8_t size)
+{         	
+	uint8_t t,temp;
+	uint8_t enshow=0;						   
+	for(t=0;t<len;t++)
 	{
-		NT35510_OpenWindow ( usX_Start, usY_Start, usWidth, usHeight );
-		NT35510_FillColor ( usWidth * usHeight ,CurrentTextColor);	
-	}
-	else
-	{
-		NT35510_DrawLine ( usX_Start, usY_Start, usX_Start + usWidth - 1, usY_Start );
-		NT35510_DrawLine ( usX_Start, usY_Start + usHeight - 1, usX_Start + usWidth - 1, usY_Start + usHeight - 1 );
-		NT35510_DrawLine ( usX_Start, usY_Start, usX_Start, usY_Start + usHeight - 1 );
-		NT35510_DrawLine ( usX_Start + usWidth - 1, usY_Start, usX_Start + usWidth - 1, usY_Start + usHeight - 1 );		
-	}
-
-}
-
-
-/**
- * @brief  在 NT35510 显示器上使用 Bresenham 算法画圆
- * @param  usX_Center ：在特定扫描方向下圆心的X坐标
- * @param  usY_Center ：在特定扫描方向下圆心的Y坐标
- * @param  usRadius：圆的半径（单位：像素）
- * @param  ucFilled ：选择是否填充该圆
-  *   该参数为以下值之一：
-  *     @arg 0 :空心圆
-  *     @arg 1 :实心圆
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DrawCircle ( uint16_t usX_Center, uint16_t usY_Center, uint16_t usRadius, uint8_t ucFilled )
-{
-	int16_t sCurrentX, sCurrentY;
-	int16_t sError;
-	
-	
-	sCurrentX = 0; sCurrentY = usRadius;	  
-	
-	sError = 3 - ( usRadius << 1 );     //判断下个点位置的标志
-	
-	
-	while ( sCurrentX <= sCurrentY )
-	{
-		int16_t sCountY;
-		
-		
-		if ( ucFilled ) 			
-			for ( sCountY = sCurrentX; sCountY <= sCurrentY; sCountY ++ ) 
-			{                      
-				NT35510_SetPointPixel ( usX_Center + sCurrentX, usY_Center + sCountY );           //1，研究对象 
-				NT35510_SetPointPixel ( usX_Center - sCurrentX, usY_Center + sCountY );           //2       
-				NT35510_SetPointPixel ( usX_Center - sCountY,   usY_Center + sCurrentX );           //3
-				NT35510_SetPointPixel ( usX_Center - sCountY,   usY_Center - sCurrentX );           //4
-				NT35510_SetPointPixel ( usX_Center - sCurrentX, usY_Center - sCountY );           //5    
-        NT35510_SetPointPixel ( usX_Center + sCurrentX, usY_Center - sCountY );           //6
-				NT35510_SetPointPixel ( usX_Center + sCountY,   usY_Center - sCurrentX );           //7 	
-        NT35510_SetPointPixel ( usX_Center + sCountY,   usY_Center + sCurrentX );           //0				
-			}
-		
-		else
-		{          
-			NT35510_SetPointPixel ( usX_Center + sCurrentX, usY_Center + sCurrentY );             //1，研究对象
-			NT35510_SetPointPixel ( usX_Center - sCurrentX, usY_Center + sCurrentY );             //2      
-			NT35510_SetPointPixel ( usX_Center - sCurrentY, usY_Center + sCurrentX );             //3
-			NT35510_SetPointPixel ( usX_Center - sCurrentY, usY_Center - sCurrentX );             //4
-			NT35510_SetPointPixel ( usX_Center - sCurrentX, usY_Center - sCurrentY );             //5       
-			NT35510_SetPointPixel ( usX_Center + sCurrentX, usY_Center - sCurrentY );             //6
-			NT35510_SetPointPixel ( usX_Center + sCurrentY, usY_Center - sCurrentX );             //7 
-			NT35510_SetPointPixel ( usX_Center + sCurrentY, usY_Center + sCurrentX );             //0
-    }			
-		
-		
-		sCurrentX ++;
-
-		
-		if ( sError < 0 ) 
-			sError += 4 * sCurrentX + 6;	  
-		
-		else
+		temp=(num/LCD_Pow(10,len-t-1))%10;
+		if(enshow==0&&t<(len-1))
 		{
-			sError += 10 + 4 * ( sCurrentX - sCurrentY );   
-			sCurrentY --;
-		} 	
-		
-		
-	}
-	
-	
-}
-
-/**
- * @brief  在 NT35510 显示器上显示一个英文字符
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下该点的起始Y坐标
- * @param  cChar ：要显示的英文字符
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispChar_EN ( uint16_t usX, uint16_t usY, const char cChar )
-{
-	uint8_t  byteCount, bitCount,fontLength;	
-	uint16_t ucRelativePositon;
-	uint8_t *Pfont;
-	
-	//对ascii码表偏移（字模表不包含ASCII表的前32个非图形符号）
-	ucRelativePositon = cChar - ' ';
-	
-	//每个字模的字节数
-	fontLength = (LCD_Currentfonts->Width*LCD_Currentfonts->Height)/8;
-		
-	//字模首地址
-	/*ascii码表偏移值乘以每个字模的字节数，求出字模的偏移位置*/
-	Pfont = (uint8_t *)&LCD_Currentfonts->table[ucRelativePositon * fontLength];
-	
-	//设置显示窗口
-	NT35510_OpenWindow ( usX, usY, LCD_Currentfonts->Width, LCD_Currentfonts->Height);
-	
-	NT35510_Write_Cmd ( CMD_SetPixel );			
-
-	//按字节读取字模数据
-	//由于前面直接设置了显示窗口，显示数据会自动换行
-	for ( byteCount = 0; byteCount < fontLength; byteCount++ )
-	{
-			//一位一位处理要显示的颜色
-			for ( bitCount = 0; bitCount < 8; bitCount++ )
+			if(temp==0)
 			{
-					if ( Pfont[byteCount] & (0x80>>bitCount) )
-						NT35510_Write_Data ( CurrentTextColor );			
-					else
-						NT35510_Write_Data ( CurrentBackColor );
-			}	
-	}	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示英文字符串
- * @param  line ：在特定扫描方向下字符串的起始Y坐标
-  *   本参数可使用宏LINE(0)、LINE(1)等方式指定文字坐标，
-  *   宏LINE(x)会根据当前选择的字体来计算Y坐标值。
-	*		显示中文且使用LINE宏时，需要把英文字体设置成Font8x16
- * @param  pStr ：要显示的英文字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispStringLine_EN (  uint16_t line,  char * pStr )
-{
-	uint16_t usX = 0;
-	
-	while ( * pStr != '\0' )
-	{
-		if ( ( usX - NT35510_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			line += LCD_Currentfonts->Height;
+				LCD_ShowChar(x+(size/2)*t,y,' ',size,0);
+				continue;
+			}else enshow=1; 
+		 	 
 		}
-		
-		if ( ( line - NT35510_DispWindow_Y_Star + LCD_Currentfonts->Height ) > LCD_Y_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			line = NT35510_DispWindow_Y_Star;
-		}
-		
-		NT35510_DispChar_EN ( usX, line, * pStr);
-		
-		pStr ++;
-		
-		usX += LCD_Currentfonts->Width;
-		
+	 	LCD_ShowChar(x+(size/2)*t,y,temp+'0',size,0); 
 	}
-	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示英文字符串
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下字符的起始Y坐标
- * @param  pStr ：要显示的英文字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispString_EN ( 	uint16_t usX ,uint16_t usY,  char * pStr )
-{
-	while ( * pStr != '\0' )
-	{
-		if ( ( usX - NT35510_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			usY += LCD_Currentfonts->Height;
-		}
-		
-		if ( ( usY - NT35510_DispWindow_Y_Star + LCD_Currentfonts->Height ) > LCD_Y_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			usY = NT35510_DispWindow_Y_Star;
-		}
-		
-		NT35510_DispChar_EN ( usX, usY, * pStr);
-		
-		pStr ++;
-		
-		usX += LCD_Currentfonts->Width;
-		
-	}
-	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示英文字符串(沿Y轴方向)
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下字符的起始Y坐标
- * @param  pStr ：要显示的英文字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispString_EN_YDir (	 uint16_t usX,uint16_t usY ,  char * pStr )
-{	
-	while ( * pStr != '\0' )
-	{
-		if ( ( usY - NT35510_DispWindow_Y_Star + LCD_Currentfonts->Height ) >LCD_Y_LENGTH  )
-		{
-			usY = NT35510_DispWindow_Y_Star;
-			usX += LCD_Currentfonts->Width;
-		}
-		
-		if ( ( usX - NT35510_DispWindow_X_Star + LCD_Currentfonts->Width ) >  LCD_X_LENGTH)
-		{
-			usX = NT35510_DispWindow_X_Star;
-			usY = NT35510_DispWindow_Y_Star;
-		}
-		
-		NT35510_DispChar_EN ( usX, usY, * pStr);
-		
-		pStr ++;
-		
-		usY += LCD_Currentfonts->Height;		
-	}	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示一个中文字符
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下字符的起始Y坐标
- * @param  usChar ：要显示的中文字符（国标码）
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */ 
-void NT35510_DispChar_CH ( uint16_t usX, uint16_t usY, uint16_t usChar )
-{
-	uint8_t rowCount, bitCount;
-  uint32_t usTemp; 
-	
-//	占用空间太大，改成全局变量 
-//	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
-	
-	//设置显示窗口
-	NT35510_OpenWindow ( usX, usY, WIDTH_CH_CHAR, HEIGHT_CH_CHAR );
-	
-	NT35510_Write_Cmd ( CMD_SetPixel );
-	
-	//取字模数据  
-  GetGBKCode ( ucBuffer, usChar );	
-	
-	for ( rowCount = 0; rowCount < HEIGHT_CH_CHAR; rowCount++ )
-	{
-    /* 取出四个字节的数据，在lcd上即是一个汉字的一行 */
-		usTemp = ucBuffer [ rowCount * 4 ];
-		usTemp = ( usTemp << 8 );
-		usTemp |= ucBuffer [ rowCount * 4 + 1 ];
-		usTemp = ( usTemp << 8 );
-		usTemp |= ucBuffer [ rowCount * 4 + 2 ];
-		usTemp = ( usTemp << 8 );
-		usTemp |= ucBuffer [ rowCount * 4 + 3 ];
-		
-		for ( bitCount = 0; bitCount < WIDTH_CH_CHAR; bitCount ++ )
-		{			
-			if ( usTemp & ( 0x80000000 >> bitCount ) )  //高位在前 
-			  NT35510_Write_Data ( CurrentTextColor );				
-			else
-				NT35510_Write_Data ( CurrentBackColor );			
-		}		
-	}
-	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示中文字符串
- * @param  line ：在特定扫描方向下字符串的起始Y坐标
-  *   本参数可使用宏LINE(0)、LINE(1)等方式指定文字坐标，
-  *   宏LINE(x)会根据当前选择的字体来计算Y坐标值。
-	*		显示中文且使用LINE宏时，需要把英文字体设置成Font8x16
- * @param  pStr ：要显示的英文字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispString_CH ( 	uint16_t usX , uint16_t usY, char * pStr )
-{	
-	uint16_t usCh;
-
-	
-	while( * pStr != '\0' )
-	{		
-		if ( ( usX - NT35510_DispWindow_X_Star + WIDTH_CH_CHAR ) > LCD_X_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			usY += HEIGHT_CH_CHAR;
-		}
-		
-		if ( ( usY - NT35510_DispWindow_Y_Star + HEIGHT_CH_CHAR ) > LCD_Y_LENGTH )
-		{
-			usX = NT35510_DispWindow_X_Star;
-			usY = NT35510_DispWindow_Y_Star;
-		}	
-		
-		usCh = * ( uint16_t * ) pStr;	
-	  usCh = ( usCh << 8 ) + ( usCh >> 8 );
-
-		NT35510_DispChar_CH ( usX, usY, usCh );
-		
-		usX += WIDTH_CH_CHAR;
-		
-		pStr += 2;           //一个汉字两个字节 
-
-	}	   
-	
-}
-
-
-/**
- * @brief  在 NT35510 显示器上显示中英文字符串
- * @param  line ：在特定扫描方向下字符串的起始Y坐标
-  *   本参数可使用宏LINE(0)、LINE(1)等方式指定文字坐标，
-  *   宏LINE(x)会根据当前选择的字体来计算Y坐标值。
-	*		显示中文且使用LINE宏时，需要把英文字体设置成Font8x16
- * @param  pStr ：要显示的字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispStringLine_EN_CH (  uint16_t line, char * pStr )
-{
-	uint16_t usCh;
-	uint16_t usX = 0;
-	
-	while( * pStr != '\0' )
-	{
-		if ( * pStr <= 126 )	           	//英文字符
-		{
-			if ( ( usX - NT35510_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				line += LCD_Currentfonts->Height;
-			}
-			
-			if ( ( line - NT35510_DispWindow_Y_Star + LCD_Currentfonts->Height ) > LCD_Y_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				line = NT35510_DispWindow_Y_Star;
-			}			
-		
-		  NT35510_DispChar_EN ( usX, line, * pStr );
-			
-			usX +=  LCD_Currentfonts->Width;
-		
-		  pStr ++;
-
-		}
-		
-		else	                            //汉字字符
-		{
-			if ( ( usX - NT35510_DispWindow_X_Star + WIDTH_CH_CHAR ) > LCD_X_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				line += HEIGHT_CH_CHAR;
-			}
-			
-			if ( ( line - NT35510_DispWindow_Y_Star + HEIGHT_CH_CHAR ) > LCD_Y_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				line = NT35510_DispWindow_Y_Star;
-			}	
-			
-			usCh = * ( uint16_t * ) pStr;	
-			
-			usCh = ( usCh << 8 ) + ( usCh >> 8 );		
-
-			NT35510_DispChar_CH ( usX, line, usCh );
-			
-			usX += WIDTH_CH_CHAR;
-			
-			pStr += 2;           //一个汉字两个字节 
-		
-    }
-		
-  }	
 } 
-
-/**
- * @brief  在 NT35510 显示器上显示中英文字符串
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下字符的起始Y坐标
- * @param  pStr ：要显示的字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispString_EN_CH ( 	uint16_t usX , uint16_t usY, char * pStr )
-{
-	uint16_t usCh;
-	
-	while( * pStr != '\0' )
+//显示数字,高位为0,还是显示
+//x,y:起点坐标
+//num:数值(0~999999999);	 
+//len:长度(即要显示的位数)
+//size:字体大小
+//mode:
+//[7]:0,不填充;1,填充0.
+//[6:1]:保留
+//[0]:0,非叠加显示;1,叠加显示.
+void LCD_ShowxNum(uint16_t x,uint16_t y,uint32_t num,uint8_t len,uint8_t size,uint8_t mode)
+{  
+	uint8_t t,temp;
+	uint8_t enshow=0;						   
+	for(t=0;t<len;t++)
 	{
-		if ( * pStr <= 126 )	           	//英文字符
+		temp=(num/LCD_Pow(10,len-t-1))%10;
+		if(enshow==0&&t<(len-1))
 		{
-			if ( ( usX - NT35510_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
+			if(temp==0)
 			{
-				usX = NT35510_DispWindow_X_Star;
-				usY += LCD_Currentfonts->Height;
-			}
-			
-			if ( ( usY - NT35510_DispWindow_Y_Star + LCD_Currentfonts->Height ) > LCD_Y_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				usY = NT35510_DispWindow_Y_Star;
-			}			
-		
-		  NT35510_DispChar_EN ( usX, usY, * pStr );
-			
-			usX +=  LCD_Currentfonts->Width;
-		
-		  pStr ++;
-
+				if(mode&0X80)LCD_ShowChar(x+(size/2)*t,y,'0',size,mode&0X01);  
+				else LCD_ShowChar(x+(size/2)*t,y,' ',size,mode&0X01);  
+ 				continue;
+			}else enshow=1; 
+		 	 
 		}
-		
-		else	                            //汉字字符
-		{
-			if ( ( usX - NT35510_DispWindow_X_Star + WIDTH_CH_CHAR ) > LCD_X_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				usY += HEIGHT_CH_CHAR;
-			}
-			
-			if ( ( usY - NT35510_DispWindow_Y_Star + HEIGHT_CH_CHAR ) > LCD_Y_LENGTH )
-			{
-				usX = NT35510_DispWindow_X_Star;
-				usY = NT35510_DispWindow_Y_Star;
-			}	
-			
-			usCh = * ( uint16_t * ) pStr;	
-			
-			usCh = ( usCh << 8 ) + ( usCh >> 8 );		
-
-			NT35510_DispChar_CH ( usX, usY, usCh );
-			
-			usX += WIDTH_CH_CHAR;
-			
-			pStr += 2;           //一个汉字两个字节 
-		
-    }
-		
-  }	
+	 	LCD_ShowChar(x+(size/2)*t,y,temp+'0',size,mode&0X01); 
+	}
 } 
-
-/**
- * @brief  在 NT35510 显示器上显示中英文字符串(沿Y轴方向)
- * @param  usX ：在特定扫描方向下字符的起始X坐标
- * @param  usY ：在特定扫描方向下字符的起始Y坐标
- * @param  pStr ：要显示的中英文字符串的首地址
- * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
- * @retval 无
- */
-void NT35510_DispString_EN_CH_YDir (  uint16_t usX,uint16_t usY , char * pStr )
-{
-	uint16_t usCh;
-	
-	while( * pStr != '\0' )
-	{			
-			//统一使用汉字的宽高来计算换行
-			if ( ( usY - NT35510_DispWindow_Y_Star + HEIGHT_CH_CHAR ) >LCD_Y_LENGTH  )
-			{
-				usY = NT35510_DispWindow_Y_Star;
-				usX += WIDTH_CH_CHAR;
-			}			
-			if ( ( usX - NT35510_DispWindow_X_Star + WIDTH_CH_CHAR ) >  LCD_X_LENGTH)
-			{
-				usX = NT35510_DispWindow_X_Star;
-				usY = NT35510_DispWindow_Y_Star;
-			}
-			
-		//显示	
-		if ( * pStr <= 126 )	           	//英文字符
-		{			
-			NT35510_DispChar_EN ( usX, usY, * pStr);
-			
-			pStr ++;
-			
-			usY += HEIGHT_CH_CHAR;		
-		}
-		else	                            //汉字字符
-		{			
-			usCh = * ( uint16_t * ) pStr;	
-			
-			usCh = ( usCh << 8 ) + ( usCh >> 8 );		
-
-			NT35510_DispChar_CH ( usX,usY , usCh );
-			
-			usY += HEIGHT_CH_CHAR;
-			
-			pStr += 2;           //一个汉字两个字节 
-		
-    }
-		
-  }	
-} 
-
-/***********************缩放字体****************************/
-#define ZOOMMAXBUFF 16384
-uint8_t zoomBuff[ZOOMMAXBUFF] = {0};	//用于缩放的缓存，最大支持到128*128
-uint8_t zoomTempBuff[1024] = {0};
-
-/**
- * @brief  缩放字模，缩放后的字模由1个像素点由8个数据位来表示
-										0x01表示笔迹，0x00表示空白区
- * @param  in_width ：原始字符宽度
- * @param  in_heig ：原始字符高度
- * @param  out_width ：缩放后的字符宽度
- * @param  out_heig：缩放后的字符高度
- * @param  in_ptr ：字库输入指针	注意：1pixel 1bit
- * @param  out_ptr ：缩放后的字符输出指针 注意: 1pixel 8bit
- *		out_ptr实际上没有正常输出，改成了直接输出到全局指针zoomBuff中
- * @param  en_cn ：0为英文，1为中文
- * @retval 无
- */
-void NT35510_zoomChar(uint16_t in_width,	//原始字符宽度
-									uint16_t in_heig,		//原始字符高度
-									uint16_t out_width,	//缩放后的字符宽度
-									uint16_t out_heig,	//缩放后的字符高度
-									uint8_t *in_ptr,	//字库输入指针	注意：1pixel 1bit
-									uint8_t *out_ptr, //缩放后的字符输出指针 注意: 1pixel 8bit
-									uint8_t en_cn)		//0为英文，1为中文	
-{
-	uint8_t *pts,*ots;
-	//根据源字模及目标字模大小，设定运算比例因子，左移16是为了把浮点运算转成定点运算
-	unsigned int xrIntFloat_16=(in_width<<16)/out_width+1; 
-  unsigned int yrIntFloat_16=(in_heig<<16)/out_heig+1;
-	
-	unsigned int srcy_16=0;
-	unsigned int y,x;
-	uint8_t *pSrcLine;
-	
-	uint16_t byteCount,bitCount;
-	
-	//检查参数是否合法
-	if(in_width > 48) return;												//字库不允许超过48像素
-	if(in_width * in_heig == 0) return;	
-	if(in_width * in_heig > 48*48 ) return; 					//限制输入最大 48*48
-	
-	if(out_width * out_heig == 0) return;	
-	if(out_width * out_heig >= ZOOMMAXBUFF ) return; //限制最大缩放 128*128
-	pts = (uint8_t*)&zoomTempBuff;
-	
-	//为方便运算，字库的数据由1 pixel/1bit 映射到1pixel/8bit
-	//0x01表示笔迹，0x00表示空白区
-	if(en_cn == 0x00)//英文
-	{
-		//英文和中文字库上下边界不对，可在此处调整。需要注意tempBuff防止溢出
-			for(byteCount=0;byteCount<in_heig*in_width/8;byteCount++)	
-			{
-				for(bitCount=0;bitCount<8;bitCount++)
-					{						
-						//把源字模数据由位映射到字节
-						//in_ptr里bitX为1，则pts里整个字节值为1
-						//in_ptr里bitX为0，则pts里整个字节值为0
-						*pts++ = (in_ptr[byteCount] & (0x80>>bitCount))?1:0; 
-					}
-			}				
-	}
-	else //中文
-	{			
-			for(byteCount=0;byteCount<in_heig*in_width/8;byteCount++)	
-			{
-				for(bitCount=0;bitCount<8;bitCount++)
-					{						
-						//把源字模数据由位映射到字节
-						//in_ptr里bitX为1，则pts里整个字节值为1
-						//in_ptr里bitX为0，则pts里整个字节值为0
-						*pts++ = (in_ptr[byteCount] & (0x80>>bitCount))?1:0; 
-					}
-			}		
-	}
-
-	//zoom过程
-	pts = (uint8_t*)&zoomTempBuff;	//映射后的源数据指针
-	ots = (uint8_t*)&zoomBuff;	//输出数据的指针
-	for (y=0;y<out_heig;y++)	/*行遍历*/
-    {
-				unsigned int srcx_16=0;
-        pSrcLine=pts+in_width*(srcy_16>>16);				
-        for (x=0;x<out_width;x++) /*行内像素遍历*/
-        {
-            ots[x]=pSrcLine[srcx_16>>16]; //把源字模数据复制到目标指针中
-            srcx_16+=xrIntFloat_16;			//按比例偏移源像素点
-        }
-        srcy_16+=yrIntFloat_16;				  //按比例偏移源像素点
-        ots+=out_width;						
-    }
-	/*！！！缩放后的字模数据直接存储到全局指针zoomBuff里了*/
-	out_ptr = (uint8_t*)&zoomBuff;	//out_ptr没有正确传出，后面调用直接改成了全局变量指针！
-	
-	/*实际中如果使用out_ptr不需要下面这一句！！！
-		只是因为out_ptr没有使用，会导致warning。强迫症*/
-	out_ptr++; 
-}			
-
-
-/**
- * @brief  利用缩放后的字模显示字符
- * @param  Xpos ：字符显示位置x
- * @param  Ypos ：字符显示位置y
- * @param  Font_width ：字符宽度
- * @param  Font_Heig：字符高度
- * @param  c ：要显示的字模数据
- * @param  DrawModel ：是否反色显示 
- * @retval 无
- */
-void NT35510_DrawChar_Ex(uint16_t usX, //字符显示位置x
-												uint16_t usY, //字符显示位置y
-												uint16_t Font_width, //字符宽度
-												uint16_t Font_Height,  //字符高度 
-												uint8_t *c,						//字模数据
-												uint16_t DrawModel)		//是否反色显示
-{
-  uint32_t index = 0, counter = 0;
-
-	//设置显示窗口
-	NT35510_OpenWindow ( usX, usY, Font_width, Font_Height);
-	
-	NT35510_Write_Cmd ( CMD_SetPixel );		
-	
-	//按字节读取字模数据
-	//由于前面直接设置了显示窗口，显示数据会自动换行
-	for ( index = 0; index < Font_Height; index++ )
-	{
-			//一位一位处理要显示的颜色
-			for ( counter = 0; counter < Font_width; counter++ )
-			{
-					//缩放后的字模数据，以一个字节表示一个像素位
-					//整个字节值为1表示该像素为笔迹
-					//整个字节值为0表示该像素为背景
-					if ( *c++ == DrawModel )
-						NT35510_Write_Data ( CurrentBackColor );			
-					else
-						NT35510_Write_Data ( CurrentTextColor );
-			}	
-	}	
-}
-
-
-/**
- * @brief  利用缩放后的字模显示字符串
- * @param  Xpos ：字符显示位置x
- * @param  Ypos ：字符显示位置y
- * @param  Font_width ：字符宽度，英文字符在此基础上/2。注意为偶数
- * @param  Font_Heig：字符高度，注意为偶数
- * @param  c ：要显示的字符串
- * @param  DrawModel ：是否反色显示 
- * @retval 无
- */
-void NT35510_DisplayStringEx(uint16_t x, 		//字符显示位置x
-														 uint16_t y, 				//字符显示位置y
-														 uint16_t Font_width,	//要显示的字体宽度，英文字符在此基础上/2。注意为偶数
-														 uint16_t Font_Height,	//要显示的字体高度，注意为偶数
-														 uint8_t *ptr,					//显示的字符内容
-														 uint16_t DrawModel)  //是否反色显示
-
-
-
-{
-	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr;
-	uint8_t Ascii;	//英文
-	uint16_t usCh;  //中文
-	
-	//占用空间太大，改成全局变量	
-	//	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
-	
-	while ( *ptr != '\0')
-	{
-			/****处理换行*****/
-			if ( ( x - NT35510_DispWindow_X_Star + Charwidth ) > LCD_X_LENGTH )
-			{
-				x = NT35510_DispWindow_X_Star;
-				y += Font_Height;
-			}
-			
-			if ( ( y - NT35510_DispWindow_Y_Star + Font_Height ) > LCD_Y_LENGTH )
-			{
-				x = NT35510_DispWindow_X_Star;
-				y = NT35510_DispWindow_Y_Star;
-			}	
-			
-		if(*ptr > 0x80) //如果是中文
-		{			
-			Charwidth = Font_width;
-			usCh = * ( uint16_t * ) ptr;				
-			usCh = ( usCh << 8 ) + ( usCh >> 8 );
-			GetGBKCode ( ucBuffer, usCh );	//取字模数据
-			//缩放字模数据，源字模为32*32
-			NT35510_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
-			//显示单个字符
-			NT35510_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
-			x+=Charwidth;
-			ptr+=2;
-		}
-		else
-		{
-				Charwidth = Font_width / 2;
-				Ascii = *ptr - 32;
-				//使用16*32字体缩放字模数据
-				NT35510_zoomChar(16,32,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
-			  //显示单个字符
-				NT35510_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
-				x+=Charwidth;
-				ptr++;
-		}
-	}
-}
-
-
-/**
- * @brief  利用缩放后的字模显示字符串(沿Y轴方向)
- * @param  Xpos ：字符显示位置x
- * @param  Ypos ：字符显示位置y
- * @param  Font_width ：字符宽度，英文字符在此基础上/2。注意为偶数
- * @param  Font_Heig：字符高度，注意为偶数
- * @param  c ：要显示的字符串
- * @param  DrawModel ：是否反色显示 
- * @retval 无
- */
-void NT35510_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
-																		 uint16_t y, 				//字符显示位置y
-																		 uint16_t Font_width,	//要显示的字体宽度，英文字符在此基础上/2。注意为偶数
-																		 uint16_t Font_Height,	//要显示的字体高度，注意为偶数
-																		 uint8_t *ptr,					//显示的字符内容
-																		 uint16_t DrawModel)  //是否反色显示
-{
-	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr;
-	uint8_t Ascii;	//英文
-	uint16_t usCh;  //中文
-	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
-	
-	while ( *ptr != '\0')
-	{			
-			//统一使用汉字的宽高来计算换行
-			if ( ( y - NT35510_DispWindow_X_Star + Font_width ) > LCD_X_LENGTH )
-			{
-				y = NT35510_DispWindow_X_Star;
-				x += Font_width;
-			}
-			
-			if ( ( x - NT35510_DispWindow_Y_Star + Font_Height ) > LCD_Y_LENGTH )
-			{
-				y = NT35510_DispWindow_X_Star;
-				x = NT35510_DispWindow_Y_Star;
-			}	
-			
-		if(*ptr > 0x80) //如果是中文
-		{			
-			Charwidth = Font_width;
-			usCh = * ( uint16_t * ) ptr;				
-			usCh = ( usCh << 8 ) + ( usCh >> 8 );
-			GetGBKCode ( ucBuffer, usCh );	//取字模数据
-			//缩放字模数据，源字模为16*16
-			NT35510_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
-			//显示单个字符
-			NT35510_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
-			y+=Font_Height;
-			ptr+=2;
-		}
-		else
-		{
-				Charwidth = Font_width / 2;
-				Ascii = *ptr - 32;
-				//使用16*24字体缩放字模数据
-				NT35510_zoomChar(16,24,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
-			  //显示单个字符
-				NT35510_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
-				y+=Font_Height;
-				ptr++;
-		}
-	}
-}
-
-/**
-  * @brief  设置英文字体类型
-  * @param  fonts: 指定要选择的字体
-	*		参数为以下值之一
-  * 	@arg：Font24x32;
-  * 	@arg：Font16x24;
-  * 	@arg：Font8x16;
-  * @retval None
-  */
-void LCD_SetFont(sFONT *fonts)
-{
-  LCD_Currentfonts = fonts;
-}
-
-/**
-  * @brief  获取当前字体类型
-  * @param  None.
-  * @retval 返回当前字体类型
-  */
-sFONT *LCD_GetFont(void)
-{
-  return LCD_Currentfonts;
-}
-
-
-/**
-  * @brief  设置LCD的前景(字体)及背景颜色,RGB565
-  * @param  TextColor: 指定前景(字体)颜色
-  * @param  BackColor: 指定背景颜色
-  * @retval None
-  */
-void LCD_SetColors(uint16_t TextColor, uint16_t BackColor) 
-{
-  CurrentTextColor = TextColor; 
-  CurrentBackColor = BackColor;
-}
-
-/**
-  * @brief  获取LCD的前景(字体)及背景颜色,RGB565
-  * @param  TextColor: 用来存储前景(字体)颜色的指针变量
-  * @param  BackColor: 用来存储背景颜色的指针变量
-  * @retval None
-  */
-void LCD_GetColors(uint16_t *TextColor, uint16_t *BackColor)
-{
-  *TextColor = CurrentTextColor;
-  *BackColor = CurrentBackColor;
-}
-
-/**
-  * @brief  设置LCD的前景(字体)颜色,RGB565
-  * @param  Color: 指定前景(字体)颜色 
-  * @retval None
-  */
-void LCD_SetTextColor(uint16_t Color)
-{
-  CurrentTextColor = Color;
-}
-
-/**
-  * @brief  设置LCD的背景颜色,RGB565
-  * @param  Color: 指定背景颜色 
-  * @retval None
-  */
-void LCD_SetBackColor(uint16_t Color)
-{
-  CurrentBackColor = Color;
-}
-
-/**
-  * @brief  清除某行文字
-  * @param  Line: 指定要删除的行
-  *   本参数可使用宏LINE(0)、LINE(1)等方式指定要删除的行，
-  *   宏LINE(x)会根据当前选择的字体来计算Y坐标值，并删除当前字体高度的第x行。
-  * @retval None
-  */
-void NT35510_ClearLine(uint16_t Line)
-{
-  NT35510_Clear(0,Line,LCD_X_LENGTH,((sFONT *)LCD_GetFont())->Height);	/* 清屏，显示全黑 */
-
-}
-
-/*用于测试各种液晶的函数*/
-void LCD_Test(void)
-{
-	/*演示显示变量*/
-	static uint8_t testCNT = 0;	
-	char dispBuff[100];
-	
-	testCNT++;	
-	
-	LCD_SetFont(&Font16x32);
-	LCD_SetColors(RED,BLACK);
-
-  NT35510_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);	/* 清屏，显示全黑 */
-	/********显示字符串示例*******/ 
-//  NT35510_DispStringLine_EN_CH(LINE(0),"野火4.3寸LCD参数：");
-//  NT35510_DispStringLine_EN_CH(LINE(2),"分辨率：480x800 px");
-//  NT35510_DispStringLine_EN_CH(LINE(3),"NT35510液晶驱动");
-//  NT35510_DispStringLine_EN_CH(LINE(4),"GT9147触摸屏驱动");
-    Show_Str(30,50,250,24,"对应汉字为(24*24):",24,0); 
-	/********显示变量示例*******/
-	LCD_SetTextColor(GREEN);
-
-	/*使用c标准库把变量转化成字符串*/
-	sprintf(dispBuff,"显示变量计数 : %d ",testCNT);
-  NT35510_ClearLine(LINE(7));	/* 清除单行文字 */
-	
-	/*然后显示该字符串即可，其它变量也是这样处理*/
-	NT35510_DispStringLine_EN(LINE(7),dispBuff);
-
-	/*******显示图形示例******/
-  /* 画直线 */
-  
-  NT35510_ClearLine(LINE(7));/* 清除单行文字 */
-	LCD_SetTextColor(BLUE);
-
-  NT35510_DispStringLine_EN_CH(LINE(7),"画直线:");
-  
-	LCD_SetTextColor(RED);
-  NT35510_DrawLine(50,270,420,275);  
-  NT35510_DrawLine(50,300,420,375);
-  
-	LCD_SetTextColor(GREEN);
-  NT35510_DrawLine(50,370,420,475);  
-  NT35510_DrawLine(50,400,420,475);
-	
-	LCD_SetTextColor(BLUE);
-  NT35510_DrawLine(50,420,420,325);  
-  NT35510_DrawLine(50,450,420,395);
-  
-  HAL_Delay(500);
-  
-  NT35510_Clear(0,32*7,LCD_X_LENGTH,LCD_Y_LENGTH-32*7);	/* 清屏，显示全黑 */
-  
-  
-  /*画矩形*/
-
-  NT35510_ClearLine(LINE(7));	/* 清除单行文字 */
-	LCD_SetTextColor(BLUE);
-
-  NT35510_DispStringLine_EN_CH(LINE(7),"画矩形:");
-
-	LCD_SetTextColor(RED);
-  NT35510_DrawRectangle(50,300,200,100,1);
-	
-	LCD_SetTextColor(GREEN);
-  NT35510_DrawRectangle(100,300,200,120,0);
-	
-	LCD_SetTextColor(BLUE);
-  NT35510_DrawRectangle(250,300,200,150,1);
-  
-  
-  HAL_Delay(500);
-	
-	NT35510_Clear(0,32*7,LCD_X_LENGTH,LCD_Y_LENGTH-32*7);	/* 清屏，显示全黑 */
-
-  /* 画圆 */
-  NT35510_ClearLine(LINE(7));	/* 清除单行文字 */
-	LCD_SetTextColor(BLUE);
-	
-  NT35510_DispStringLine_EN_CH(LINE(7),"画圆:");
-
-	LCD_SetTextColor(RED);
-	NT35510_DrawCircle(150,400,60,1);
-
-	LCD_SetTextColor(GREEN);
-	NT35510_DrawCircle(250,400,60,0);
-
-	LCD_SetTextColor(BLUE);
-	NT35510_DrawCircle(350,400,60,1);
-
-  HAL_Delay(500);
-  
-  NT35510_Clear(0,32*7,LCD_X_LENGTH,LCD_Y_LENGTH-32*7);	/* 清屏，显示全黑 */
-
+//显示字符串
+//x,y:起点坐标
+//width,height:区域大小  
+//size:字体大小
+//*p:字符串起始地址		  
+void LCD_ShowString(uint16_t x,uint16_t y,uint16_t width,uint16_t height,uint8_t size,uint8_t *p)
+{         
+	uint8_t x0=x;
+	width+=x;
+	height+=y;
+    while((*p<='~')&&(*p>=' '))//判断是不是非法字符!
+    {       
+        if(x>=width){x=x0;y+=size;}
+        if(y>=height)break;//退出
+        LCD_ShowChar(x,y,*p,size,0);
+        x+=size/2;
+        p++;
+    }  
 }
 
 //code 字符指针开始
@@ -2127,8 +1199,8 @@ void Show_Font(uint16_t x,uint16_t y,uint8_t *font,uint8_t size,uint8_t mode)
 		temp=dzk[t];			//得到点阵数据                          
 		for(t1=0;t1<8;t1++)
 		{
-			if(temp&0x80)NT35510_DrawPoint(x,y, CurrentTextColor);
-			else if(mode==0) NT35510_DrawPoint(x,y, CurrentBackColor);
+			if(temp&0x80)LCD_Fast_DrawPoint(x,y, POINT_COLOR);
+			else if(mode==0) LCD_Fast_DrawPoint(x,y, BACK_COLOR);
 			temp<<=1;
 			y++;
 			if((y-y0)==size)
@@ -2206,41 +1278,6 @@ void Show_Str_Mid(uint16_t x,uint16_t y,uint8_t*str,uint8_t size,uint8_t len)
 	}
 }   
 
-//在指定位置显示一个字符
-//x,y:起始坐标
-//num:要显示的字符:" "--->"~"
-//size:字体大小 12/16/24/32
-//mode:叠加方式(1)还是非叠加方式(0)
-void LCD_ShowChar(uint16_t x,uint16_t y,uint8_t num,uint8_t size,uint8_t mode)
-{  							  
-    uint8_t temp,t1,t;
-	uint16_t y0=y;
-	uint8_t csize=(size/8+((size%8)?1:0))*(size/2);		//得到字体一个字符对应点阵集所占的字节数	
- 	num=num-' ';//得到偏移后的值（ASCII字库是从空格开始取模，所以-' '就是对应字符的字库）
-	for(t=0;t<csize;t++)
-	{   
-		if(size==12)temp=asc2_1206[num][t]; 	 	//调用1206字体
-		else if(size==16)temp=asc2_1608[num][t];	//调用1608字体
-		else if(size==24)temp=asc2_2412[num][t];	//调用2412字体
-		else if(size==32)temp=asc2_3216[num][t];	//调用3216字体
-		else return;								//没有的字库
-		for(t1=0;t1<8;t1++)
-		{			    
-			if(temp&0x80)NT35510_DrawPoint(x,y, CurrentTextColor);
-			else if(mode==0) NT35510_DrawPoint(x,y, CurrentBackColor);
-			temp<<=1;
-			y++;
-			if(y>=lcddev.height)return;		//超区域了
-			if((y-y0)==size)
-			{
-				y=y0;
-				x++;
-				if(x>=lcddev.width)return;	//超区域了
-				break;
-			}
-		}  	 
-	}  	    	   	 	  
-}   
 /*********************end of file*************************/
 
 

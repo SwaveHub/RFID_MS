@@ -31,10 +31,6 @@ RAM基地址 = 0X6D00 0000 = 0X6C00 0000+2^23*2 = 0X6C00 0000 + 0X100 0000 = 0X6D00
 //由片选引脚决定的NOR/SRAM块
 #define      FSMC_Bank1_NORSRAMx           FSMC_NORSRAM_BANK4 
 
-
-/*************************************** 调试预用 ******************************************/
-#define      DEBUG_DELAY()                
-
 /***************************** ILI934 显示区域的起始坐标和总行列数 ***************************/
 #define      NT35510_DispWindow_X_Star		    0     //起始点的X坐标
 #define      NT35510_DispWindow_Y_Star		    0     //起始点的Y坐标
@@ -42,81 +38,13 @@ RAM基地址 = 0X6D00 0000 = 0X6C00 0000+2^23*2 = 0X6C00 0000 + 0X100 0000 = 0X6D00
 #define 			NT35510_LESS_PIXEL	  							480			//液晶屏较短方向的像素宽度
 #define 			NT35510_MORE_PIXEL	 								800			//液晶屏较长方向的像素宽度
 
-//根据液晶扫描方向而变化的XY像素宽度
-//调用NT35510_GramScan函数设置方向时会自动更改
-extern uint16_t LCD_X_LENGTH,LCD_Y_LENGTH; 
-
-//液晶屏扫描模式
-//参数可选值为0-7
-extern uint8_t LCD_SCAN_MODE;
-
-/******************************* 定义 ILI934 显示屏常用颜色 ********************************/
-#define      BACKGROUND		                BLACK   //默认背景颜色
-
-#define      WHITE		 		                  0xFFFF	   //白色
-#define      BLACK                         0x0000	   //黑色 
-#define      GREY                          0xF7DE	   //灰色 
-#define      BLUE                          0x001F	   //蓝色 
-#define      BLUE2                         0x051F	   //浅蓝色 
-#define      RED                           0xF800	   //红色 
-#define      MAGENTA                       0xF81F	   //红紫色，洋红色 
-#define      GREEN                         0x07E0	   //绿色 
-#define      CYAN                          0x7FFF	   //蓝绿色，青色 
-#define      YELLOW                        0xFFE0	   //黄色 
-#define      BRED                          0xF81F
-#define      GRED                          0xFFE0
-#define      GBLUE                         0x07FF
-
-
-
-/******************************* 定义 ILI934 常用命令 ********************************/
-#define      CMD_SetCoordinateX		 		    0x2A00	     //设置X坐标
-#define      CMD_SetCoordinateY		 		    0x2B00	     //设置Y坐标
-#define      CMD_SetPixel		 		          0x2C00	     //填充像素
-
-
-
-
-/********************************** 声明 ILI934 函数 ***************************************/
+/********************************** 声明 NT35510 函数 ***************************************/
 void                     NT35510_Init                    ( void );
 void                     NT35510_Rst                     ( void );
 void                     NT35510_BackLed_Control         ( FunctionalState enumState );
-void                     LCD_ReadID                      (void);
-void                     NT35510_GramScan                ( uint8_t ucOtion );
-void                     NT35510_OpenWindow              ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight );
-void                     NT35510_Clear                   ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight );
-void                     NT35510_SetPointPixel           ( uint16_t usX, uint16_t usY );
-void                     NT35510_DrawPoint ( uint16_t usX, uint16_t usY, uint16_t usColor );
-uint16_t                 NT35510_GetPointPixel           ( uint16_t usX , uint16_t usY );
-void                     NT35510_DrawLine                ( uint16_t usX1, uint16_t usY1, uint16_t usX2, uint16_t usY2 );
-void                     NT35510_DrawRectangle           ( uint16_t usX_Start, uint16_t usY_Start, uint16_t usWidth, uint16_t usHeight,uint8_t ucFilled );
-void                     NT35510_DrawCircle              ( uint16_t usX_Center, uint16_t usY_Center, uint16_t usRadius, uint8_t ucFilled );
-void                     NT35510_DispChar_EN             ( uint16_t usX, uint16_t usY, const char cChar );
-void                     NT35510_DispStringLine_EN       ( uint16_t line, char * pStr );
-void                     NT35510_DispString_EN      		 ( uint16_t usX, uint16_t usY, char * pStr );
-void 										 NT35510_DispString_EN_YDir 		 ( uint16_t usX,uint16_t usY ,  char * pStr );
-void                     NT35510_DispChar_CH             ( uint16_t usX, uint16_t usY, uint16_t usChar );
-void                     NT35510_DispString_CH           ( uint16_t usX, uint16_t usY,  char * pStr );
-void                     NT35510_DispString_EN_CH        (	uint16_t usX, uint16_t usY,  char * pStr );
-void 										 NT35510_DispStringLine_EN_CH 	(  uint16_t line, char * pStr );
-void 										 NT35510_DispString_EN_YDir 		(   uint16_t usX,uint16_t usY ,  char * pStr );
-void 										 NT35510_DispString_EN_CH_YDir 	(   uint16_t usX,uint16_t usY , char * pStr );
-
-void 											LCD_SetFont											(sFONT *fonts);
-sFONT 										*LCD_GetFont											(void);
-void 											NT35510_ClearLine										(uint16_t Line);
-void 											LCD_SetBackColor								(uint16_t Color);
-void 											LCD_SetTextColor								(uint16_t Color)	;
-void 											LCD_SetColors										(uint16_t TextColor, uint16_t BackColor);
-void 											LCD_GetColors										(uint16_t *TextColor, uint16_t *BackColor);
-
-void LCD_Test(void);
+uint16_t                LCD_ReadID                      (void);
     
 #define 									LCD_ClearLine 						NT35510_ClearLine
-
-/* 直接操作寄存器的方法控制IO */
-#define	digitalH(p,i)			{p->BSRR=i;}			  //设置为高电平		
-#define digitalL(p,i)			{p->BSRR=(uint32_t)i << 16;}				//输出低电平
 
 //LCD重要参数集
 typedef struct  
@@ -125,20 +53,117 @@ typedef struct
 	uint16_t height;			//LCD 高度
 	uint16_t id;				//LCD ID
 	uint8_t  dir;			//横屏还是竖屏控制：0，竖屏；1，横屏。	
-	uint16_t	wramcmd;		//开始写gram指令
+	uint16_t	wramcmd;		//写gram指令,填充像素
 	uint16_t setxcmd;		//设置x坐标指令
 	uint16_t setycmd;		//设置y坐标指令 
 }_lcd_dev; 	  
 
+//LCD分辨率设置
+#define LCD_WIDTH		480		//LCD水平分辨率
+#define LCD_HEIGHT		800		//LCD垂直分辨率
+#define LCD_WRAMCMD		0X2C00		//写gram指令,填充像素
+#define LCD_SETXCMD    0X2A00		//设置x坐标指令
+#define LCD_SETYCMD    0X2B00		//设置y坐标指令 
+
 //LCD参数
 extern _lcd_dev lcddev;	//管理LCD重要参数
+//LCD的画笔颜色和背景色	   
+extern uint16_t  POINT_COLOR;//默认红色    
+extern uint16_t  BACK_COLOR; //背景颜色.默认为白色
+
+//////////////////////////////////////////////////////////////////////////////////	 
+//-----------------LCD端口定义---------------- 
+#define             LCD_LED_GPIO_PORT                       GPIOB
+#define             LCD_LED_GPIO_PIN                        GPIO_PIN_0
+
+/* 直接操作寄存器的方法控制IO */
+#define	digitalH(p,i)			{p->BSRR=i;}			  //设置为高电平		
+#define digitalL(p,i)			{p->BSRR=(uint32_t)i << 16;}				//输出低电平
+
+//LCD地址结构体
+typedef struct
+{
+	volatile uint16_t LCD_REG;
+	volatile uint16_t LCD_RAM;
+} LCD_TypeDef;
+//使用NOR/SRAM的 Bank1.sector4,地址位HADDR[27,26]=11 A10作为数据命令区分线 
+//注意设置时STM32内部会右移一位对其! 			    
+#define LCD_BASE        ((uint32_t)(0x6C000000 | 0x000007FE))
+#define LCD             ((LCD_TypeDef *) LCD_BASE)
+//////////////////////////////////////////////////////////////////////////////////
+	 
+//扫描方向定义
+#define L2R_U2D  0 //从左到右,从上到下
+#define L2R_D2U  1 //从左到右,从下到上
+#define R2L_U2D  2 //从右到左,从上到下
+#define R2L_D2U  3 //从右到左,从下到上
+
+#define U2D_L2R  4 //从上到下,从左到右
+#define U2D_R2L  5 //从上到下,从右到左
+#define D2U_L2R  6 //从下到上,从左到右
+#define D2U_R2L  7 //从下到上,从右到左	 
+
+#define DFT_SCAN_DIR  L2R_U2D  //默认的扫描方向
+
+//画笔颜色
+#define WHITE         	 0xFFFF
+#define BLACK         	 0x0000	  
+#define BLUE         	 0x001F  
+#define BRED             0XF81F
+#define GRED 			 0XFFE0
+#define GBLUE			 0X07FF
+#define RED           	 0xF800
+#define MAGENTA       	 0xF81F
+#define GREEN         	 0x07E0
+#define CYAN          	 0x7FFF
+#define YELLOW        	 0xFFE0
+#define BROWN 			 0XBC40 //棕色
+#define BRRED 			 0XFC07 //棕红色
+#define GRAY  			 0X8430 //灰色
+//GUI颜色
+
+#define DARKBLUE      	 0X01CF	//深蓝色
+#define LIGHTBLUE      	 0X7D7C	//浅蓝色  
+#define GRAYBLUE       	 0X5458 //灰蓝色
+//以上三色为PANEL的颜色 
+ 
+#define LIGHTGREEN     	 0X841F //浅绿色
+//#define LIGHTGRAY        0XEF5B //浅灰色(PANNEL)
+#define LGRAY 			 0XC618 //浅灰色(PANNEL),窗体背景色
+
+#define LGRAYBLUE        0XA651 //浅灰蓝色(中间层颜色)
+#define LBBLUE           0X2B12 //浅棕蓝色(选择条目的反色)
+	    															  
+void LCD_Init(void);													   	//初始化
+void LCD_DisplayOn(void);													//开显示
+void LCD_DisplayOff(void);													//关显示
+void LCD_Clear(uint16_t Color);	 												//清屏
+void LCD_SetCursor(uint16_t Xpos, uint16_t Ypos);										//设置光标
+void LCD_DrawPoint(uint16_t x,uint16_t y);											//画点
+void LCD_Fast_DrawPoint(uint16_t x,uint16_t y,uint16_t color);								//快速画点
+uint16_t  LCD_ReadPoint(uint16_t x,uint16_t y); 											//读点 
+void LCD_Draw_Circle(uint16_t x0,uint16_t y0,uint8_t r);						 			//画圆
+void LCD_DrawLine(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);							//画线
+void LCD_DrawRectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);		   				//画矩形
+void LCD_Fill(uint16_t sx,uint16_t sy,uint16_t ex,uint16_t ey,uint16_t color);		   				//填充单色
+void LCD_Color_Fill(uint16_t sx,uint16_t sy,uint16_t ex,uint16_t ey,uint16_t *color);				//填充指定颜色
+void LCD_ShowChar(uint16_t x,uint16_t y,uint8_t num,uint8_t size,uint8_t mode);						//显示一个字符
+void LCD_ShowNum(uint16_t x,uint16_t y,uint32_t num,uint8_t len,uint8_t size);  						//显示一个数字
+void LCD_ShowxNum(uint16_t x,uint16_t y,uint32_t num,uint8_t len,uint8_t size,uint8_t mode);				//显示 数字
+void LCD_ShowString(uint16_t x,uint16_t y,uint16_t width,uint16_t height,uint8_t size,uint8_t *p);		//显示一个字符串,12/16字体
+
+void LCD_WriteReg(uint16_t LCD_Reg, uint16_t LCD_RegValue);
+uint16_t LCD_ReadReg(uint16_t LCD_Reg);
+void LCD_WriteRAM_Prepare(void);
+void LCD_WriteRAM(uint16_t RGB_Code);
+void LCD_Scan_Dir(uint8_t dir);									//设置屏扫描方向
+void LCD_Display_Dir(uint8_t dir);								//设置屏幕显示方向
+void LCD_Set_Window(uint16_t sx,uint16_t sy,uint16_t width,uint16_t height);	//设置窗口					   						   																			 
 
 void Get_HzMat(unsigned char *code,unsigned char *mat,uint8_t size);			//得到汉字的点阵码
 void Show_Font(uint16_t x,uint16_t y,uint8_t *font,uint8_t size,uint8_t mode);					//在指定位置显示一个汉字
 void Show_Str(uint16_t x,uint16_t y,uint16_t width,uint16_t height,uint8_t*str,uint8_t size,uint8_t mode);	//在指定位置显示一个字符串 
 void Show_Str_Mid(uint16_t x,uint16_t y,uint8_t*str,uint8_t size,uint8_t len);  //在指定宽度的中间显示字符串
-void LCD_ShowChar(uint16_t x,uint16_t y,uint8_t num,uint8_t size,uint8_t mode);
-
 #endif /* __BSP_NT35510_NT35510_H */
 
 

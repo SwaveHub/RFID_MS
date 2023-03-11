@@ -127,11 +127,13 @@ void MX_FREERTOS_Init(void) {
 void StartDefaultTask(void const * argument)
 {
   /* USER CODE BEGIN StartDefaultTask */
+
   /* Infinite loop */
   for(;;)
   {
-    lv_task_handler();
-    osDelay(5);
+    //Touch_TouchDetect(&Touch_Dev);
+    lv_task_handler();//lvgl的事务处理
+    osDelay(1);
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -154,9 +156,9 @@ void Start_Led_Toggle(void const * argument)
         Protocol_Decode(PROTOCOL_MODE_DEFAULT, RxBuffer, strlen(RxBuffer));  
         Rx_Sta = 0;
     }
-    Unix_To_YMD_Time(&system_time, RTC_Get_UnixTime());
-        printf("%d-%d-%d %d:%d:%d\r\n", system_time.year, system_time.month, system_time.day,
-            system_time.hour, system_time.minute, system_time.second);         
+//    Unix_To_YMD_Time(&system_time, RTC_Get_UnixTime());
+//    printf("%d-%d-%d %d:%d:%d\r\n", system_time.year, system_time.month, system_time.day,
+//        system_time.hour, system_time.minute, system_time.second);         
     osDelay(500);
     HAL_GPIO_TogglePin(LED0_GPIO_Port,LED0_Pin);
     osDelay(500);
