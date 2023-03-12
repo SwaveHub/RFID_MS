@@ -103,7 +103,7 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 /*
  普通定时器实现us延时
 */
-void user_delaynus_tim(uint32_t nus)
+void delay_us(uint32_t nus)
 {
 
  uint16_t  differ = 0xffff-nus-5;
@@ -123,9 +123,9 @@ void user_delaynus_tim(uint32_t nus)
 /*
  普通定时器实现ms延时，可直接使用HAL库函数HAL_delay（）
 */
-void delay_ms_tim(uint16_t nms)
+void delay_ms(uint16_t nms)
 {
  uint32_t i;
- for(i=0;i<nms;i++) user_delaynus_tim(1000);
+ for(i=0;i<nms;i++) delay_us(1000);
 }
 /* USER CODE END 1 */

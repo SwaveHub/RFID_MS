@@ -8,6 +8,9 @@
 #include "./font/fonts.h"	
 #include "./touch/bsp_i2c_touch.h"
 #include "./touch/bsp_gt9147_touch.h"
+#include ".\key\bsp_key.h" 
+#include ".\rfid\bsp_rf200_rfid.h"
+#include ".\rfid\bsp_rfid.h"
 #include "gpio.h"
 #include "rtc.h"
 #include "tim.h"
@@ -16,8 +19,7 @@
 #include "Unix.h"
 
 /******************************** 宏定义 *************************************/
-#define delay_us    user_delaynus_tim
-#define delay_ms    delay_ms_tim
+
 /***************************** 全局变量声明 **********************************/
 
 /******************************* 函数声明 ************************************/

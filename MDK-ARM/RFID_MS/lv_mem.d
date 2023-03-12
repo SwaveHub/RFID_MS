@@ -1,0 +1,10 @@
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\lv_mem.c
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\lv_mem.h
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\../../../lv_conf.h
+rfid_ms\lv_mem.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stdint.h
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\../../../lvgl/src/lv_conf_checker.h
+rfid_ms\lv_mem.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stddef.h
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\lv_log.h
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\../../../lv_conf.h
+rfid_ms\lv_mem.o: ..\GUI\lvgl\src\lv_misc\lv_math.h
+rfid_ms\lv_mem.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\string.h

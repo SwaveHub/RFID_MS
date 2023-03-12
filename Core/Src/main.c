@@ -93,9 +93,10 @@ int main(void)
   MX_GPIO_Init();
   MX_RTC_Init();
   MX_USART1_UART_Init();
-  //MX_FSMC_Init();
+//  MX_FSMC_Init();
   MX_SPI2_Init();
   MX_TIM2_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
     SPI_FLASH_Init();
     font_init();

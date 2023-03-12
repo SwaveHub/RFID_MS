@@ -35,6 +35,8 @@ extern "C" {
 
 extern UART_HandleTypeDef huart1;
 
+extern UART_HandleTypeDef huart2;
+
 /* USER CODE BEGIN Private defines */
 #ifdef __GNUC__
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
@@ -43,15 +45,21 @@ extern UART_HandleTypeDef huart1;
 #define GETCHAR_PROTOTYPE int fgetc(FILE *f)
 #endif
 
-#define RXBUFFERSIZE  256     //最大接收字节数
-extern uint8_t RxBuffer[RXBUFFERSIZE];   //接收数据
-extern uint8_t Rx_Sta; //接收数据状态 0：未接收到数据  1：完整接收到一次数据
+#define UART1_REC_LEN          256     //最大接收字节数
+#define UART2_REC_LEN          200     //最大接收字节数
+
+extern uint8_t Uart1_Rx_Buf[UART1_REC_LEN];   //接收数据
+extern uint8_t Uart1_Rx_Sta; //接收数据状态 0：未接收到数据  1：完整接收到一次数据
+
+extern uint8_t Uart2_Rx_Buf[UART2_REC_LEN];   //接收数据
 /* USER CODE END Private defines */
 
 void MX_USART1_UART_Init(void);
+void MX_USART2_UART_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+void PutString(unsigned char *dat, unsigned char len);
+void USART_RXD_Data_Process(void);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

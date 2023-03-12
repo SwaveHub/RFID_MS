@@ -21,13 +21,18 @@
 #include "usart.h"
 
 /* USER CODE BEGIN 0 */
-uint8_t RxBuffer[RXBUFFERSIZE];   //接收数据
-uint8_t Rx_Sta = 0; //接收数据状态 0：未接收到数据  1：完整接收到一次数据
 uint8_t aRxBuffer;			//接收中断缓冲
+
+uint8_t Uart1_Rx_Buf[UART1_REC_LEN];   //接收数据
 uint8_t Uart1_Rx_Cnt = 0;		//接收缓冲计数
+uint8_t Uart1_Rx_Sta = 0; //接收数据状态 0：未接收到数据  1：完整接收到一次数据
+
+uint8_t Uart2_Rx_Buf[UART2_REC_LEN];   //接收数据
+uint8_t Uart2_Rx_Cnt = 0;		//接收缓冲计数
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
 
 /* USART1 init function */
 
@@ -56,6 +61,35 @@ void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
     HAL_UART_Receive_IT(&huart1, (uint8_t *)&aRxBuffer, 1);
   /* USER CODE END USART1_Init 2 */
+
+}
+/* USART2 init function */
+
+void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+  HAL_UART_Receive_IT(&huart2, (uint8_t *)&aRxBuffer, 1);
+  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -93,6 +127,36 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART1_MspInit 1 */
   }
+  else if(uartHandle->Instance==USART2)
+  {
+  /* USER CODE BEGIN USART2_MspInit 0 */
+
+  /* USER CODE END USART2_MspInit 0 */
+    /* USART2 clock enable */
+    __HAL_RCC_USART2_CLK_ENABLE();
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    /**USART2 GPIO Configuration
+    PA2     ------> USART2_TX
+    PA3     ------> USART2_RX
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /* USART1 interrupt Init */
+    HAL_NVIC_SetPriority(USART2_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(USART2_IRQn);
+  /* USER CODE BEGIN USART2_MspInit 1 */
+
+  /* USER CODE END USART2_MspInit 1 */
+  }
 }
 
 void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
@@ -118,6 +182,24 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART1_MspDeInit 1 */
   }
+  else if(uartHandle->Instance==USART2)
+  {
+  /* USER CODE BEGIN USART2_MspDeInit 0 */
+
+  /* USER CODE END USART2_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_USART2_CLK_DISABLE();
+
+    /**USART2 GPIO Configuration
+    PA2     ------> USART2_TX
+    PA3     ------> USART2_RX
+    */
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_2|GPIO_PIN_3);
+
+  /* USER CODE BEGIN USART2_MspDeInit 1 */
+
+  /* USER CODE END USART2_MspDeInit 1 */
+  }
 }
 
 /* USER CODE BEGIN 1 */
@@ -132,4 +214,106 @@ PUTCHAR_PROTOTYPE
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1 , 0xffff);
     return ch;
 }
+
+/**
+  * 函数功能: 重定向c库函数getchar,scanf到DEBUG_USARTx
+  * 输入参数: 无
+  * 返 回 值: 无
+  * 说    明：无
+  */
+GETCHAR_PROTOTYPE
+{
+  uint8_t ch = 0;
+  HAL_UART_Receive(&huart1, &ch, 1, 0xffff);
+  return ch;
+}
+
+/**
+  * 函数功能: 串口的中断回调函数
+  * 输入参数: UART_HandleTypeDef *huart
+  * 返 回 值: 无
+  * 说    明：无
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  /* Prevent unused argument(s) compilation warning */
+  UNUSED(huart);
+  /* NOTE: This function Should not be modified, when the callback is needed,
+           the HAL_UART_TxCpltCallback could be implemented in the user file
+   */
+    /* 对串口1的中断服务函数处理 */
+    if (huart->Instance == USART1) { 
+        if(Uart1_Rx_Cnt >= 255)  //溢出判断
+        {
+            Uart1_Rx_Cnt = 0;
+            memset(Uart1_Rx_Buf,0x00,sizeof(Uart1_Rx_Buf));
+            HAL_UART_Transmit(&huart1, (uint8_t *)"数据溢出", 10,0xFFFF); 	
+        }
+        else
+        {
+            /* 当前数据未处理完前不接收新的数据 */
+            if (!Uart1_Rx_Sta) {  
+                Uart1_Rx_Buf[Uart1_Rx_Cnt++] = aRxBuffer;   //接收数据转存
+
+                if((Uart1_Rx_Buf[Uart1_Rx_Cnt-2] == 0x0D)&&(Uart1_Rx_Buf[Uart1_Rx_Cnt-1] == 0x0A)) //判断结束位
+                {
+                    Uart1_Rx_Buf[Uart1_Rx_Cnt-2] = '\0';    //不把判断结束位的\r\n算进接收的数据
+                    Uart1_Rx_Cnt = 0;
+                    Uart1_Rx_Sta = 1;
+                }                       
+            }
+        }
+        HAL_UART_Receive_IT(&huart1, (uint8_t *)&aRxBuffer, 1);   //再开启接收中断
+    }	
+	
+    /* 对串口2的中断服务函数处理 */
+    if (huart->Instance == USART2) {     
+        if((Uart2_Rx_Cnt == 0)&&(aRxBuffer == 0xBB))// frame start must 0xbb
+		{
+			Uart2_Rx_Buf[0] = aRxBuffer;
+			Uart2_Rx_Cnt++; 
+		}
+        else if((Uart2_Rx_Cnt>0)&&(Uart2_Rx_Cnt < UART2_REC_LEN))
+        {
+            Uart2_Rx_Buf[Uart2_Rx_Cnt] = aRxBuffer; 
+            Uart2_Rx_Cnt++; 
+        }
+        HAL_UART_Receive_IT(&huart2, (uint8_t *)&aRxBuffer, 1);   //再开启接收中断
+    }
+}
+
+
+/**
+  * 函数功能: 专用于与RFID读写器进行串口通信时使用的函数
+  * 输入参数: unsigned char *dat, unsigned char len
+  * 返 回 值: 无
+  * 说    明：无
+  */
+void PutString(unsigned char *dat, unsigned char len)
+{
+	unsigned int    i;
+	for(i = 0; i < len; i++) {
+		  HAL_UART_Transmit(&huart2, dat++, 1 , 0xffff);
+	}
+}
+
+/**********************************************************************************************************
+USART_RXD_Data_Process：串口接收函数
+功能：接收一帧数据
+**********************************************************************************************************/
+void USART_RXD_Data_Process(void)
+{
+	unsigned int    length  ;    //  data length                     
+	if (Uart2_Rx_Cnt>5) 
+	{
+		length = Uart2_Rx_Buf[4];
+		if(Uart2_Rx_Cnt>=(length+7)&&Uart2_Rx_Buf[length+6] == 0x7e)//revice frame end
+		{
+			Usart_buff_copy(Uart2_Rx_Buf,length+7);
+			Uart2_Rx_Cnt = 0;
+		}
+        printf("get data : %s\r\n", Uart2_Rx_Buf);
+	} 
+}
+
 /* USER CODE END 1 */

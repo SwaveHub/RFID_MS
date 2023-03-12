@@ -970,9 +970,24 @@
               <FilePath>..\BSP\flash\bsp_spi_flash.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\key\bsp_key.c</FilePath>
+            </File>
+            <File>
               <FileName>fonts.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\font\fonts.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_rfid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\rfid\bsp_rfid.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_rf200_rfid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\rfid\bsp_rf200_rfid.c</FilePath>
             </File>
             <File>
               <FileName>bsp.h</FileName>
