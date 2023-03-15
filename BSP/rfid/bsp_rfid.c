@@ -21,10 +21,92 @@
 #include ".\rfid\bsp_rf200_rfid.h" 
 #include "usart.h" 
 
+uint8_t TagAccessPassword[4]={0x00,0x00,0x00,0x00};
+uint8_t TagWriteDATA[8]={0x12,0x34,0x56,0x78,0x78,0x56,0x34,0x16};
+int first_flag = 1;
+unsigned int flag1s = 1;         //  1000ms溢出标志位
+
+uint8_t tag_cnt = 0;    // 标签计数
+tag_filter_t tag_filter;
+
+/**
+  * @brief  获取单个RFID电子标签的TID(96位)
+  * @param  无
+  * @retval 无
+  */	
+void RFID_GetSingleTID()
+{
+    if (RF200Status.ReadDataFlag == 0 && tag_cnt < MAX_TAG_NUM) {
+        TAG_WR_PARA.AccessPW[0]=TagAccessPassword[0]; //ACCESS PASSWORD
+        TAG_WR_PARA.AccessPW[1]=TagAccessPassword[1];
+        TAG_WR_PARA.AccessPW[2]=TagAccessPassword[2];
+        TAG_WR_PARA.AccessPW[3]=TagAccessPassword[3];
+        TAG_WR_PARA.MemBank=Membank_TID;
+        TAG_WR_PARA.Offset=0;// OFFSET 0 WORD;(2BYTE=1WORD)
+        TAG_WR_PARA.len=6;//LENGTH 4 WORDS=8 BYTES;
+        TAG_WR_PARA.dat=TAG_READ_DATA.dat;// data buffer
+        TagReadProcess(TAG[0].TID,TAG_WR_PARA);
+    }
+    
+    USART_RXD_Data_Process();
+    RF200_FRAME_RX_HANDLE();	    
+    
+    if (RF200Status.ReadDataFlag == 1) {
+        for(uint32_t i=0;i<12;i++){
+            TAG[tag_cnt].TID[i]=TAG_READ_DATA.dat[i];// copy to frame handle buffer;
+        } 
+        tag_cnt++;
+        RF200Status.ReadDataFlag = 0;
+    }
+}
+
+/**
+  * @brief  获取多个RFID电子标签的TID(96位)
+  * @param  无
+  * @retval 无
+  */	
+void RFID_GetMultiTID()
+{
+
+}
+
+/**
+  * @brief  筛选出的RFID电子标签
+  * @param  处理的标签数
+  * @retval 无
+  */	
+void RFID_FilterTag(uint8_t *cnt)
+{
+    uint32_t i,j;
+    uint8_t same_mark[MAX_TAG_NUM] = {0};
+    tag_filter.len =  0;
+    
+    for (i = 0; i < *cnt; i++) {
+        if (same_mark[i] == 0) {
+            memcpy(&(tag_filter.tag[tag_filter.len++]), TAG[i].TID, 12);
+        } else continue;
+        
+        for (j = i; j < *cnt; j++) {
+            if (same_mark[j] == 0) {
+                if (memcmp(TAG[i].TID, TAG[j].TID, 12) == 0) same_mark[j] = 1;
+            }
+        }
+    }
+    
+    for (uint32_t i = 0; i < tag_filter.len; i++) {
+        printf("TID[%u]:", i);
+        for(uint32_t j=0;j<12;j++){
+            printf("%02X ",tag_filter.tag[i].TID[j]);
+        } 
+        printf("\r\n");
+    }
+   *cnt = 0;
+}
+
 /*************Single Inventory example *****************/
 void contain_test(void)
 {
-    SendCmdFrame(SingleInventCMD);
+	SendCmdFrame(MultiInventCMD);
     
     USART_RXD_Data_Process();
     RF200_FRAME_RX_HANDLE();		
@@ -39,10 +121,6 @@ void contain_test1(void)
     RF200_FRAME_RX_HANDLE();		
 }
 /*************Read/Write User bank example*****************/
-uint8_t TagAccessPassword[4]={0x00,0x00,0x00,0x00};
-uint8_t TagWriteDATA[8]={0x12,0x34,0x56,0x78,0x78,0x56,0x34,0x16};
-int first_flag = 1;
-unsigned int flag1s = 1;         //  1000ms溢出标志位
 void contain_test2(void)
 {
 	if(first_flag){

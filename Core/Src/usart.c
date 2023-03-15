@@ -312,7 +312,6 @@ void USART_RXD_Data_Process(void)
 			Usart_buff_copy(Uart2_Rx_Buf,length+7);
 			Uart2_Rx_Cnt = 0;
 		}
-        printf("get data : %s\r\n", Uart2_Rx_Buf);
 	} 
 }
 

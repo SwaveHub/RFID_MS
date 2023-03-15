@@ -248,11 +248,18 @@ void Start_RFIDScan_Task(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    evt = osMessageGet(KeySta_QueueHandle, 1);
+    evt = osMessageGet(KeySta_QueueHandle, 20);
     if (evt.value.v == KEY_PRESS) {
         scan_sta = KEY_PRESS;
-    } else if (evt.value.v == KEY_RELEASE) scan_sta = KEY_RELEASE;
-    if (scan_sta != KEY_RELEASE) contain_test2();
+    } else if (evt.value.v == KEY_RELEASE) {
+        scan_sta = KEY_RELEASE;
+        RFID_FilterTag(&tag_cnt);
+        HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    }
+    if (scan_sta != KEY_RELEASE) {
+        RFID_GetSingleTID();
+        HAL_GPIO_TogglePin(LED1_GPIO_Port,LED1_Pin);
+    }
     osDelay(1);
   }
   /* USER CODE END Start_RFIDScan_Task */

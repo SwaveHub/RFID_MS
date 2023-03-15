@@ -132,6 +132,7 @@ typedef struct {
 
 //±êÇ©×´Ì¬
 typedef struct {
+	uint8_t TID[12];    
 	uint8_t EPC[12];
 	uint8_t RSSI;
 	uint8_t flag;//0:empty; 1:full; 
