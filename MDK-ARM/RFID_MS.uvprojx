@@ -394,16 +394,6 @@
           <GroupName>Application/User/Core</GroupName>
           <Files>
             <File>
-              <FileName>lv_conf.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\GUI\lv_conf.h</FilePath>
-            </File>
-            <File>
-              <FileName>lv_ex_conf.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\GUI\lv_ex_conf.h</FilePath>
-            </File>
-            <File>
               <FileName>protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\protocol.c</FilePath>
@@ -620,6 +610,16 @@
               <FileName>stm32f1xx_hal_timebase_tim.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f1xx_hal_timebase_tim.c</FilePath>
+            </File>
+            <File>
+              <FileName>lv_conf.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\GUI\lv_conf.h</FilePath>
+            </File>
+            <File>
+              <FileName>lv_ex_conf.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\GUI\lv_ex_conf.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -1433,6 +1433,31 @@
               <FileName>demo.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\GUI_APP\demo.c</FilePath>
+            </File>
+            <File>
+              <FileName>screen_home.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\GUI_APP\screen_home.c</FilePath>
+            </File>
+            <File>
+              <FileName>screen_instorage.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\GUI_APP\screen_instorage.c</FilePath>
+            </File>
+            <File>
+              <FileName>screen_outstorage.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\GUI_APP\screen_outstorage.c</FilePath>
+            </File>
+            <File>
+              <FileName>btn_img_instorage.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\GUI_APP\btn_img_instorage.c</FilePath>
+            </File>
+            <File>
+              <FileName>btn_img_outstorage.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\GUI_APP\btn_img_outstorage.c</FilePath>
             </File>
           </Files>
         </Group>
