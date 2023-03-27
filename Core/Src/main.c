@@ -103,6 +103,7 @@ int main(void)
     LCD_Init();
     Touch_Init();
     
+    Unix_To_YMD_Time(&system_time, RTC_Get_UnixTime());// 获取最新RTC时间
     lv_init();                  // lvgl初始化，如果这个没有初始化，那么下面的初始化会崩溃
     lv_port_disp_init();        // 显示器初始化
     lv_port_indev_init();       // 输入设备初始化（如果没有实现就注释掉）

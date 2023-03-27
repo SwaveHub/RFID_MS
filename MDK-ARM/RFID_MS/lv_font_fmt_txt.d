@@ -1,0 +1,15 @@
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\lv_font_fmt_txt.c
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\lv_font.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../../../lv_conf.h
+rfid_ms\lv_font_fmt_txt.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stdint.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../../../lvgl/src/lv_conf_checker.h
+rfid_ms\lv_font_fmt_txt.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stddef.h
+rfid_ms\lv_font_fmt_txt.o: D:\Keil_v5\MDK\ARM\ARMCC\Bin\..\include\stdbool.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\lv_symbol_def.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../../../lv_conf.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\lv_font_fmt_txt.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../../../lv_conf.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../lv_misc/lv_types.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../lv_misc/lv_log.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../lv_misc/../../../lv_conf.h
+rfid_ms\lv_font_fmt_txt.o: ..\GUI\lvgl\src\lv_font\../lv_misc/lv_utils.h

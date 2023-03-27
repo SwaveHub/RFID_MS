@@ -43,7 +43,10 @@ LV_IMG_DECLARE(btn_img_outstorage);
 
 static lv_style_t pr_style;
 
+static lv_obj_t *mbox_upload;
 /******************************* 私有函数 ************************************/
+static lv_obj_t * mbox_create(lv_obj_t * parent, char* msg, void (*mbox_event_cb)(lv_obj_t * , lv_event_t));//函数申明
+static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event);
 
 //事件回调函数
 static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
@@ -52,6 +55,8 @@ static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
 	{
 	case LV_EVENT_CLICKED:
 	{
+         //创建一个消息对话框
+        mbox_upload = mbox_create(lv_scr_act(), "Confirm Upload", mbox_upload_event_cb);          
 	}        
 	default:
 		break;
@@ -103,6 +108,21 @@ static void imgbtn_to_outstorage_event_cb(lv_obj_t * obj, lv_event_t event)
 	}
 }
 
+static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+    uint16_t btn_id;
+    if (obj == mbox_upload) {
+        if(event == LV_EVENT_VALUE_CHANGED) {
+            //获取按钮 id
+            btn_id = lv_mbox_get_active_btn(obj);
+            if (btn_id == 0) { //OK 按钮
+                printf("upload\n");
+            }
+            lv_mbox_start_auto_close(obj,0);
+        }
+    }   
+}
+
 //例程入口
 void lv_screen_home_start()
 {
@@ -126,7 +146,11 @@ void lv_screen_home_start()
     lv_obj_set_width(label_time,100);
     lv_label_set_align(label_time,LV_LABEL_ALIGN_CENTER);//文本居中对齐    
     lv_label_set_style(label_time, LV_LABEL_STYLE_MAIN, &label_text_style);
-    lv_label_set_text(label_time,"01:23\n2023/3/17");//设置文本
+    uint8_t buf[30];
+    Unix_To_YMD_Time(&system_time, RTC_Get_UnixTime());// 获取最新RTC时间
+    sprintf(buf, "%u:%02u\n%u/%u/%u", system_time.hour, system_time.minute, 
+                                                        system_time.year, system_time.month, system_time.day);
+    lv_label_set_text(label_time, buf);//设置文本
     lv_obj_set_pos(label_time, 375, 5);
 
     //1.先创建 2 种状态下按钮样式
@@ -189,24 +213,53 @@ void lv_screen_home_start()
     //2.创建imgbtn_to_instorage图片按钮对象
     lv_obj_t * imgbtn_to_instorage = lv_imgbtn_create(scr,NULL);
     lv_imgbtn_set_src(imgbtn_to_instorage,LV_BTN_STATE_REL,&btn_img_instorage);//设置正常态松手时的图片
-//    lv_imgbtn_set_src(imgbtn_to_instorage,LV_BTN_STATE_PR,&btn_img_instorage);//设置正常态按下时的图片
-//    lv_imgbtn_set_style(imgbtn_to_instorage,LV_BTN_STATE_PR,&pr_style);//设置正常态按下时的样式
+    lv_imgbtn_set_src(imgbtn_to_instorage,LV_BTN_STATE_PR,&btn_img_instorage);//设置正常态按下时的图片
+    lv_imgbtn_set_style(imgbtn_to_instorage,LV_BTN_STATE_PR,&pr_style);//设置正常态按下时的样式
     lv_obj_set_size(imgbtn_to_instorage, 120, 80);//设置大小
     lv_obj_set_pos(imgbtn_to_instorage,30,100);//设置坐标 
     lv_obj_set_event_cb(imgbtn_to_instorage,imgbtn_to_instorage_event_cb);//设置事件回调函数
-    lv_obj_t * imgbtn_to_instorage_label = lv_label_create(imgbtn_to_instorage,NULL);//给图片按钮添加标题
+    lv_obj_t * imgbtn_to_instorage_label = lv_label_create(scr,NULL);//给图片按钮添加标题
+    lv_obj_align(imgbtn_to_instorage_label, imgbtn_to_instorage , LV_ALIGN_OUT_BOTTOM_MID, -25, 0);//文本居中对齐    
     lv_label_set_text(imgbtn_to_instorage_label, "InStorage");    
 
     //2.创建imgbtn_to_outstorage图片按钮对象
     lv_obj_t * imgbtn_to_outstorage = lv_imgbtn_create(scr,NULL);
     lv_imgbtn_set_src(imgbtn_to_outstorage,LV_BTN_STATE_REL,&btn_img_outstorage);//设置正常态松手时的图片
-//    lv_imgbtn_set_src(imgbtn_to_outstorage,LV_BTN_STATE_PR,&btn_img_outstorage);//设置正常态按下时的图片
-//    lv_imgbtn_set_style(imgbtn_to_outstorage,LV_BTN_STATE_PR,&pr_style);//设置正常态按下时的样式
+    lv_imgbtn_set_src(imgbtn_to_outstorage,LV_BTN_STATE_PR,&btn_img_outstorage);//设置正常态按下时的图片
+    lv_imgbtn_set_style(imgbtn_to_outstorage,LV_BTN_STATE_PR,&pr_style);//设置正常态按下时的样式
     lv_obj_set_size(imgbtn_to_outstorage, 120, 80);//设置大小
     lv_obj_set_pos(imgbtn_to_outstorage,180,100);//设置坐标 
     lv_obj_set_event_cb(imgbtn_to_outstorage,imgbtn_to_outstorage_event_cb);//设置事件回调函数
-    lv_obj_t * imgbtn_to_outstorage_label = lv_label_create(imgbtn_to_outstorage,NULL);//给图片按钮添加标题
+    lv_obj_t * imgbtn_to_outstorage_label = lv_label_create(scr,NULL);//给图片按钮添加标题
+    lv_obj_align(imgbtn_to_outstorage_label,  imgbtn_to_outstorage, LV_ALIGN_OUT_BOTTOM_MID, -25, 0);//文本居中对齐    
     lv_label_set_text(imgbtn_to_outstorage_label, "OutStorage");    
+}
+
+//创建自己封装之后的消息对话框
+//parent:父对象,msg显示的消息
+//返回值: 返回创建出来的消息对话框对象
+lv_obj_t * mbox_create(lv_obj_t * parent, char* msg, void (*mbox_event_cb)(lv_obj_t * , lv_event_t))
+{
+    #define MBOX_WIDTH 200 //消息对话框的宽度
+    #define MBOX_BTN_HEIGHT 30 //其内部每个按钮的高度
+
+    static const char * btns[] ={"OK", "Cancel",""};
+
+    lv_obj_t * mbox = lv_mbox_create(parent, NULL);
+    lv_mbox_set_text(mbox, msg);
+    lv_mbox_add_btns(mbox, btns);
+    lv_obj_set_width(mbox, MBOX_WIDTH);
+    lv_obj_set_event_cb(mbox, mbox_event_cb);
+    lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0); /*Align to the corner*/
+
+    //设置按钮释放状态的样式
+    lv_mbox_set_style(mbox,LV_MBOX_STYLE_BTN_REL,&my_style_btn_release);
+    //设置按钮按下状态的样式
+    lv_mbox_set_style(mbox,LV_MBOX_STYLE_BTN_PR,&my_style_btn_press);
+    lv_obj_t * btnm_of_mbox = lv_mbox_get_btnm(mbox);//获取其内部的矩阵按钮对象
+    //设置矩阵按钮的大小
+    lv_obj_set_size(btnm_of_mbox,MBOX_WIDTH,MBOX_BTN_HEIGHT);
+    return mbox;
 }
 
 /**

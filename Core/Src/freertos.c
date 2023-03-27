@@ -53,6 +53,7 @@ osThreadId Protocol_TaskHandle;
 osThreadId KeyScan_TaskHandle;
 osThreadId RFIDScan_TaskHandle;
 osMessageQId KeySta_QueueHandle;
+osMessageQId LVGL_Refresh_QueueHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -109,7 +110,11 @@ void MX_FREERTOS_Init(void) {
   /* definition and creation of KeySta_Queue */
   osMessageQDef(KeySta_Queue, 1, uint8_t);
   KeySta_QueueHandle = osMessageCreate(osMessageQ(KeySta_Queue), NULL);
-
+    
+  /* definition and creation of LVGL_Refresh_Queue */
+  osMessageQDef(LVGL_Refresh_Queue, 3, uint8_t);
+  LVGL_Refresh_QueueHandle = osMessageCreate(osMessageQ(LVGL_Refresh_Queue), NULL);
+  
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -151,11 +156,36 @@ void MX_FREERTOS_Init(void) {
 void Start_LVGL_Task(void const * argument)
 {
   /* USER CODE BEGIN Start_LVGL_Task */
+    osEvent lv_evt;        
   /* Infinite loop */
   for(;;)
   {
+    lv_evt = osMessageGet(LVGL_Refresh_QueueHandle, 10);
+    switch (lv_evt.value.v) {
+        case LVGL_TIME_REFRESH:
+            time_update();
+            break;
+        case LVGL_INSTORAGE_SINGLE_RECORD_ADD:
+            screen_instorage_record_add(TAG[0].TID);
+            break;
+        case LVGL_INSTORAGE_MULTI_RECORD_ADD:
+            for (uint32_t i = 0; i < tag_filter.len; i++) {
+                screen_instorage_record_add(tag_filter.tag[i].TID);
+            }
+            break;
+        case LVGL_OUTSTORAGE_SINGLE_RECORD_ADD:
+            screen_outstorage_record_add(TAG[0].TID);
+            break;
+        case LVGL_OUTSTORAGE_MULTI_RECORD_ADD:
+            for (uint32_t i = 0; i < tag_filter.len; i++) {
+                screen_outstorage_record_add(tag_filter.tag[i].TID);
+            }            
+            break;
+        default: 
+            break;
+    }
     lv_task_handler();//lvgl的事务处理
-    osDelay(10);      
+    osDelay(1);      
   }
   /* USER CODE END Start_LVGL_Task */
 }
@@ -176,7 +206,7 @@ void Start_LedToggle_Task(void const * argument)
     osDelay(500);
     HAL_GPIO_TogglePin(LED0_GPIO_Port,LED0_Pin);
     osDelay(500);
-    flag1s = 1;
+    osMessagePut(LVGL_Refresh_QueueHandle, LVGL_TIME_REFRESH, 20); 
   }
   /* USER CODE END Start_LedToggle_Task */
 }
@@ -226,7 +256,7 @@ void Start_KeyScan_Task(void const * argument)
         osMessagePut(KeySta_QueueHandle, KEY_PRESS, osWaitForever);        
 		/*等待按键释放 */
 		while(HAL_GPIO_ReadPin(SCANKEY_GPIO_PORT,SCANKEY_PIN) == KEY_ON);   
-        osMessagePut(KeySta_QueueHandle, KEY_RELEASE, osWaitForever);     
+        osMessagePut(KeySta_QueueHandle, KEY_RELEASE, osWaitForever); 
 	}
     osDelay(20);
   }
@@ -249,18 +279,43 @@ void Start_RFIDScan_Task(void const * argument)
   for(;;)
   {
     evt = osMessageGet(KeySta_QueueHandle, 20);
-    if (evt.value.v == KEY_PRESS) {
-        scan_sta = KEY_PRESS;
-    } else if (evt.value.v == KEY_RELEASE) {
-        scan_sta = KEY_RELEASE;
-        RFID_FilterTag(&tag_cnt);
-        HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    if (rfid_scan_enable == SCAN_ENABLE) { //RFID扫描使能
+        if (evt.value.v == KEY_PRESS) {
+            scan_sta = KEY_PRESS;
+        } else if (evt.value.v == KEY_RELEASE) {
+            scan_sta = KEY_RELEASE;
+            if (rfid_scan_mode == SCAN_MODE_INSTORAGE_MULTI || rfid_scan_mode == SCAN_MODE_OUTSTORAGE_MULTI) { //RFID连续扫描模式，松开按键后进行标签筛选及显示
+                RFID_FilterTag(&tag_cnt);
+                    if (rfid_scan_mode == SCAN_MODE_INSTORAGE_MULTI) {
+                        osMessagePut(LVGL_Refresh_QueueHandle, LVGL_INSTORAGE_MULTI_RECORD_ADD, 20); 
+                    }
+                    else  {
+                        osMessagePut(LVGL_Refresh_QueueHandle, LVGL_OUTSTORAGE_MULTI_RECORD_ADD, 20); 
+                    }
+            }
+            tag_cnt = 0;
+            HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+        }
+        if (scan_sta != KEY_RELEASE) { //RFID扫描按键未松开
+            if (rfid_scan_mode == SCAN_MODE_INSTORAGE_SINGLE || rfid_scan_mode == SCAN_MODE_OUTSTORAGE_SINGLE) { //RFID单次扫描模式
+                if (tag_cnt == 0) {
+                    RFID_GetSingleTID();
+                    HAL_GPIO_TogglePin(LED1_GPIO_Port,LED1_Pin);        
+                    if (tag_cnt != 0) {
+                        if (rfid_scan_mode == SCAN_MODE_INSTORAGE_SINGLE) {
+                            osMessagePut(LVGL_Refresh_QueueHandle, LVGL_INSTORAGE_SINGLE_RECORD_ADD, 20); 
+                        } else {
+                            osMessagePut(LVGL_Refresh_QueueHandle, LVGL_OUTSTORAGE_SINGLE_RECORD_ADD, 20); 
+                        }
+                    }
+                }          
+            } else if (rfid_scan_mode == SCAN_MODE_INSTORAGE_MULTI || rfid_scan_mode == SCAN_MODE_OUTSTORAGE_MULTI) { //RFID连续扫描模式
+                RFID_GetSingleTID();
+                HAL_GPIO_TogglePin(LED1_GPIO_Port,LED1_Pin);                
+            }
+        }        
     }
-    if (scan_sta != KEY_RELEASE) {
-        RFID_GetSingleTID();
-        HAL_GPIO_TogglePin(LED1_GPIO_Port,LED1_Pin);
-    }
-    osDelay(1);
+    osDelay(10);
   }
   /* USER CODE END Start_RFIDScan_Task */
 }

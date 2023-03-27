@@ -6,12 +6,25 @@
 #include "lv_port_indev.h"
 #include "lvgl.h"
 
+#include "screen_home.h"
+#include "screen_instorage.h"
+#include "screen_outstorage.h"
+
+#include "Unix.h"
 /******************************** 宏定义 *************************************/
 
 
 /***************************** 全局变量声明 **********************************/
+enum {
+    LVGL_TIME_REFRESH = 1,
+    LVGL_INSTORAGE_SINGLE_RECORD_ADD,
+    LVGL_INSTORAGE_MULTI_RECORD_ADD,
+    LVGL_OUTSTORAGE_SINGLE_RECORD_ADD,
+    LVGL_OUTSTORAGE_MULTI_RECORD_ADD,
+};
 
 /******************************* 函数声明 ************************************/
 void demo_create(void);
+void time_update(void);
 
 #endif /* __DEMO_H */

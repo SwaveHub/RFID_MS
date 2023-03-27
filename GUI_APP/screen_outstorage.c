@@ -32,6 +32,7 @@
 /***************************** 私有全局变量 **********************************/
 static lv_style_t my_style_btn_release;//按钮释放状态下的样式
 static lv_style_t my_style_btn_press;//按钮按下时的样式
+static lv_style_t my_style_btn_toggle;//按钮切换后的样式
 
 static lv_obj_t *label_outstorage;
 static lv_obj_t *label_time;
@@ -56,7 +57,15 @@ static bool is_cell_merge = false;//是否合并单元格,默认不合并
 //每一列的宽度
 static const uint16_t TABLE_COL_WIDTH[TABLE_COL_CNT] = {40,260,120};
 
+static uint8_t record_no = 0;
+
+static lv_obj_t * mbox_ok, *mbox_save, *mbox_upload;
 /******************************* 私有函数 ************************************/
+static lv_obj_t * mbox_create(lv_obj_t * parent, char* msg, void (*mbox_event_cb)(lv_obj_t * , lv_event_t));//函数申明
+static void mbox_ok_event_cb(lv_obj_t * obj, lv_event_t event);
+static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event);
+static void mbox_save_event_cb(lv_obj_t * obj, lv_event_t event);
+    
 //事件回调函数
 static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
 {
@@ -64,6 +73,8 @@ static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
 	{
 	case LV_EVENT_CLICKED:
 	{
+         //创建一个消息对话框
+        mbox_upload = mbox_create(lv_scr_act(), "Confirm Upload", mbox_upload_event_cb);  
 	}
 		break;
 	default:
@@ -77,8 +88,44 @@ static void btn_home_event_cb(lv_obj_t * obj, lv_event_t event)
 	{
 	case LV_EVENT_CLICKED:
 	{
+        record_no = 0;
+        rfid_scan_enable = SCAN_DISABLE;
 		lv_obj_clean(lv_scr_act());
         screen_home_create();
+	}
+		break;
+	default:
+		break;
+	}
+}
+
+static void btn_ok_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+	switch (event)
+	{
+	case LV_EVENT_CLICKED:
+	{
+        char buf[32];
+        lv_ddlist_get_selected_str(ddlist_mode,buf,sizeof(buf));//获取选项值的文本内容
+        if (strcmp(buf, "Single") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_SINGLE;
+        else if (strcmp(buf, "Multi") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_MULTI;
+	    //创建一个消息对话框
+        mbox_ok = mbox_create(lv_scr_act(), "Configuration Succeeded", mbox_ok_event_cb);        
+	}
+		break;
+	default:
+		break;
+	}
+}
+
+static void btn_save_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+	switch (event)
+	{
+	case LV_EVENT_CLICKED:
+	{
+        //创建一个消息对话框
+        mbox_save = mbox_create(lv_scr_act(), "Confirm Save", mbox_save_event_cb);  
 	}
 		break;
 	default:
@@ -91,10 +138,61 @@ static void ddlist_event_handler(lv_obj_t * obj,lv_event_t event)
 {
     if(event == LV_EVENT_VALUE_CHANGED)
     {
-    char buf[32];
-    uint16_t selected_index = lv_ddlist_get_selected(obj);//获取选项值的索引
-    lv_ddlist_get_selected_str(obj,buf,sizeof(buf));//获取选项值的文本内容
-    printf("Option index: %d,Option text:%s\r\n",selected_index,buf);
+        char buf[32];
+        uint16_t selected_index = lv_ddlist_get_selected(obj);//获取选项值的索引
+        lv_ddlist_get_selected_str(obj,buf,sizeof(buf));//获取选项值的文本内容
+        if (strcmp(buf, "Single") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_SINGLE;
+        else if (strcmp(buf, "Multi") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_MULTI;
+        printf("mode:%d\r\n",rfid_scan_mode);
+    }
+}
+
+static void mbox_ok_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+    uint16_t btn_id;
+    if (obj == mbox_ok) {
+        if(event == LV_EVENT_VALUE_CHANGED) {
+            //获取按钮 id
+            btn_id = lv_mbox_get_active_btn(obj);
+            if (btn_id == 0) { //OK 按钮
+                rfid_scan_enable = SCAN_ENABLE;
+                printf("OK\n");
+            } else if(btn_id == 1) {//Cancel 按钮
+                rfid_scan_enable = SCAN_DISABLE;
+                printf("Cancel\n");
+            }
+            lv_mbox_start_auto_close(obj,0);
+        }
+    }    
+}
+
+static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+    uint16_t btn_id;
+    if (obj == mbox_upload) {
+        if(event == LV_EVENT_VALUE_CHANGED) {
+            //获取按钮 id
+            btn_id = lv_mbox_get_active_btn(obj);
+            if (btn_id == 0) { //OK 按钮
+                printf("upload\n");
+            }
+            lv_mbox_start_auto_close(obj,0);
+        }
+    }   
+}
+
+static void mbox_save_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+    uint16_t btn_id;
+    if (obj == mbox_save) {
+        if(event == LV_EVENT_VALUE_CHANGED) {
+            //获取按钮 id
+            btn_id = lv_mbox_get_active_btn(obj);
+            if (btn_id == 0) { //OK 按钮
+                 printf("save\n");
+            }
+            lv_mbox_start_auto_close(obj,0);
+        }
     }
 }
 
@@ -121,7 +219,11 @@ void lv_screen_outstorage_start()
     lv_obj_set_width(label_time,100);
     lv_label_set_align(label_time,LV_LABEL_ALIGN_CENTER);//文本居中对齐
     lv_label_set_style(label_time, LV_LABEL_STYLE_MAIN, &label_text_style);
-    lv_label_set_text(label_time,"01:23\n2023/3/17");//设置文本
+    uint8_t buf[30];
+    Unix_To_YMD_Time(&system_time, RTC_Get_UnixTime());// 获取最新RTC时间
+    sprintf(buf, "%u:%02u\n%u/%u/%u", system_time.hour, system_time.minute, 
+                                                        system_time.year, system_time.month, system_time.day);
+    lv_label_set_text(label_time, buf);//设置文本
     lv_obj_set_pos(label_time, 375, 5);
 
     //创建 label_mode 标签
@@ -158,7 +260,14 @@ void lv_screen_outstorage_start()
     my_style_btn_press.text.color = LV_COLOR_BLACK;
     my_style_btn_press.body.padding.left = 10;//设置左内边距
     my_style_btn_press.body.padding.right = 10;//设置右内边距
-
+    //1.3 切换状态下的样式
+    lv_style_copy(&my_style_btn_toggle,&my_style_btn_press);
+    my_style_btn_toggle.body.main_color = LV_COLOR_MAKE(0x04,0xBE,0x02);
+    my_style_btn_toggle.body.grad_color = my_style_btn_toggle.body.main_color;
+    my_style_btn_toggle.body.border.color = my_style_btn_toggle.body.main_color;
+    my_style_btn_toggle.body.opa = LV_OPA_COVER;//设置背景色完全不透明
+    my_style_btn_toggle.text.color = LV_COLOR_WHITE;
+    
     //创建一个home按钮
     btn_home = lv_btn_create(scr, NULL);
     //设置按钮正常态下释放状态样式
@@ -189,11 +298,22 @@ void lv_screen_outstorage_start()
     lv_btn_set_style(btn_ok,LV_BTN_STYLE_REL,&my_style_btn_release);
     //设置按钮正常态下按下状态样式
     lv_btn_set_style(btn_ok,LV_BTN_STYLE_PR,&my_style_btn_press);
+//    //设置按钮正常态下释放状态样式
+//    lv_btn_set_style(btn_ok,LV_BTN_STYLE_REL,&my_style_btn_toggle);
+//    //设置按钮正常态下按下状态样式
+//    lv_btn_set_style(btn_ok,LV_BTN_STYLE_PR,&my_style_btn_toggle);
     lv_obj_set_size(btn_ok, 60, 30);//设置大小
     lv_obj_set_pos(btn_ok,270,100);//设置坐标
+//    lv_btn_set_toggle(btn_ok,true);//设置为 Toggle 按钮
+//    //设置按钮的起始状态为切换态下的释放状态
+//    lv_btn_set_state(btn_ok,LV_BTN_STATE_TGL_REL);
+//    //设置按钮切换态下的释放状态样式
+//    lv_btn_set_style(btn_ok,LV_BTN_STYLE_TGL_REL,&my_style_btn_release);
+//    lv_btn_set_style(btn_ok,LV_BTN_STYLE_TGL_PR,&my_style_btn_release);        
     btn_ok_label = lv_label_create(btn_ok,NULL);//给 btn_ok 添加 label 子对象
     lv_label_set_text(btn_ok_label,"OK");
-
+    lv_obj_set_event_cb(btn_ok,btn_ok_event_cb);//设置事件回调函数
+    
     //创建一个save按钮
     btn_save = lv_btn_create(scr, NULL);
     //设置按钮正常态下释放状态样式
@@ -204,7 +324,8 @@ void lv_screen_outstorage_start()
     lv_obj_set_pos(btn_save,350, 100);//设置坐标
     btn_save_label = lv_label_create(btn_save,NULL);//给 btn_save 添加 label 子对象
     lv_label_set_text(btn_save_label,"Save");
-
+    lv_obj_set_event_cb(btn_save,btn_save_event_cb);//设置事件回调函数
+    
     //1.创建样式
     //1.1 创建背景样式
     lv_style_copy(&bg_style,&lv_style_plain);
@@ -277,11 +398,73 @@ void lv_screen_outstorage_start()
     lv_table_set_style(table_detail,LV_TABLE_STYLE_CELL2,&cell2_style);
     lv_obj_set_pos(table_detail,30,190);//设置坐标
 
-    //设置单元格的文本内容
-    lv_table_set_cell_value(table_detail,1,0,"0");
-    lv_table_set_cell_value(table_detail,1,1,"E280F3372000F00001258DC9");
-    lv_table_set_cell_value(table_detail,1,2,"5:02  2023/3/23");
+//    //设置单元格的文本内容
+//    lv_table_set_cell_value(table_detail,1,0,"0");
+//    lv_table_set_cell_value(table_detail,1,1,"E280F3372000F00001258DC9");
+//    lv_table_set_cell_value(table_detail,1,2,"5:02  2023/3/23");
 
+}
+
+/**
+ * @brief   向table中添加一条数据
+ * @param  TID
+ * @retval   无
+ */
+void screen_outstorage_record_add(uint8_t *tid)
+{
+    char buf[30] = {0};
+    char buf2[30] = {0};
+    record_no++;
+
+    item_info_t *item_info_new = (item_info_t *)malloc(sizeof(item_info_t));
+    item_info_new->next = NULL;
+    item_info_new->mark = MARK_OUTSTORAGE;
+    memcpy(item_info_new->TID, tid, 12);
+    item_info_new->outstorage_time = RTC_Get_UnixTime();
+    append(&item_info_head, item_info_new);
+    if (record_no < TABLE_ROW_CNT) {    //超过表格最长显示数量则不显示    
+        sprintf(buf, "%u", record_no);   
+        lv_table_set_cell_value(table_detail,record_no,0,buf);
+        memset(buf, 0, sizeof(buf));
+        for (uint8_t i = 0; i < 12; i++) {
+            sprintf(buf2, "%02X", item_info_new->TID[i]);
+            strcat(buf, buf2);
+        }
+        printf("tid:%s\r\n", buf);
+        lv_table_set_cell_value(table_detail,record_no,1,buf);
+        memset(buf, 0, sizeof(buf));
+        Unix_To_YMD_Time(&system_time, item_info_new->outstorage_time);
+        sprintf(buf, "%u:%02u  %u/%u/%u", system_time.hour, system_time.minute, 
+                                                            system_time.year, system_time.month, system_time.day);    
+        lv_table_set_cell_value(table_detail,record_no,2,buf);
+    }
+}
+
+//创建自己封装之后的消息对话框
+//parent:父对象,msg显示的消息
+//返回值: 返回创建出来的消息对话框对象
+lv_obj_t * mbox_create(lv_obj_t * parent, char* msg, void (*mbox_event_cb)(lv_obj_t * , lv_event_t))
+{
+    #define MBOX_WIDTH 200 //消息对话框的宽度
+    #define MBOX_BTN_HEIGHT 30 //其内部每个按钮的高度
+
+    static const char * btns[] ={"OK", "Cancel",""};
+
+    lv_obj_t * mbox = lv_mbox_create(parent, NULL);
+    lv_mbox_set_text(mbox, msg);
+    lv_mbox_add_btns(mbox, btns);
+    lv_obj_set_width(mbox, MBOX_WIDTH);
+    lv_obj_set_event_cb(mbox, mbox_event_cb);
+    lv_obj_align(mbox, NULL, LV_ALIGN_CENTER, 0, 0); /*Align to the corner*/
+
+    //设置按钮释放状态的样式
+    lv_mbox_set_style(mbox,LV_MBOX_STYLE_BTN_REL,&my_style_btn_release);
+    //设置按钮按下状态的样式
+    lv_mbox_set_style(mbox,LV_MBOX_STYLE_BTN_PR,&my_style_btn_press);
+    lv_obj_t * btnm_of_mbox = lv_mbox_get_btnm(mbox);//获取其内部的矩阵按钮对象
+    //设置矩阵按钮的大小
+    lv_obj_set_size(btnm_of_mbox,MBOX_WIDTH,MBOX_BTN_HEIGHT);
+    return mbox;
 }
 
 /**

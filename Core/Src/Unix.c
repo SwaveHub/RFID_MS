@@ -6,7 +6,7 @@ system_time_t system_time = {
 	.day = 1,
 	.hour = 0,
 	.minute = 0,
-	.second = 0
+	.second = 0,
 };
 
 const unsigned char g_day_per_mon[MONTH_PER_YEAR] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};

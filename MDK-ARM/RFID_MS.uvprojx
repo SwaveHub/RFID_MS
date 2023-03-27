@@ -404,6 +404,11 @@
               <FilePath>..\Core\Src\Unix.c</FilePath>
             </File>
             <File>
+              <FileName>linked_list.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\linked_list.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
@@ -968,6 +973,11 @@
               <FileName>bsp_spi_flash.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\flash\bsp_spi_flash.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_internal_flash.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\flash\bsp_internal_flash.c</FilePath>
             </File>
             <File>
               <FileName>bsp_key.c</FileName>
