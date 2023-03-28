@@ -14,10 +14,7 @@
   *
   ******************************************************************************
   */
-  
 #include "./flash/bsp_internal_flash.h"
-
-static uint16_t FlashBuffer[STM32FLASH_PAGE_SIZE >> 1];
 
 /**
  @brief 内部Flash读取
@@ -91,7 +88,7 @@ uint32_t Internal_WriteFlashNoCheck(uint32_t addrStart, const uint16_t *pData, u
  @param address -[in] 写入的地址
  @param pData -[in] 指向需要操作的数据
  @param dataLen -[in] 数据长度
- @return 实际写入的数据量，单位：字节
+ @return 实际写入的数据量，单位：半字
 */
 uint32_t Internal_WriteFlash(uint32_t addrStart, const uint16_t *pData, uint32_t dataLen)
 {   
@@ -102,13 +99,14 @@ uint32_t Internal_WriteFlash(uint32_t addrStart, const uint16_t *pData, uint32_t
     uint32_t offset = 0;          // Address在FLASH中的偏移
     uint32_t nwrite = dataLen;    // 记录剩余要写入的数据量
     const uint16_t *pBuffer = (const uint16_t *)pData;
+    uint16_t *FlashBuffer = (uint16_t *)malloc(sizeof(uint16_t) * (STM32FLASH_PAGE_SIZE >> 1));
     
     /* 非法地址 */
     if(addrStart < STM32FLASH_BASE || addrStart > (STM32FLASH_END - 2) || dataLen == 0 || pData == NULL)
     {
         return 0;
     }
-    
+
     /* 解锁FLASH */
     HAL_FLASH_Unlock();
 
@@ -201,6 +199,7 @@ uint32_t Internal_WriteFlash(uint32_t addrStart, const uint16_t *pData, uint32_t
 
     /* 加锁FLASH */
     HAL_FLASH_Lock();
+    free(FlashBuffer);
 
     return ((dataLen - nwrite) << 1);
 }
@@ -215,16 +214,103 @@ int Internal_ErasePage(uint32_t pageAddress, uint32_t nbPages)
 {
 	uint32_t pageError = 0;
 	FLASH_EraseInitTypeDef eraseInit;
+    /* 解锁FLASH */
+    HAL_FLASH_Unlock();
 	eraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
 	eraseInit.PageAddress = pageAddress;
 	eraseInit.Banks = FLASH_BANK_1;
-	eraseInit.NbPages = 1;
+	eraseInit.NbPages = nbPages;
 	if(HAL_FLASHEx_Erase(&eraseInit, &pageError) != HAL_OK)
 	{
+        /* 加锁FLASH */
+        HAL_FLASH_Lock();    
 		return -1;
 	}
+    /* 加锁FLASH */
+    HAL_FLASH_Lock();    
 	return 0;
 }
-   
+
+/**
+ @brief 内部Flash查找可写入标签记录的起始地址
+ @param addrStart -[in] 查找区间起始地址
+ @param dataLen -[in] 数据长度
+ @return 可写入标签记录的起始地址
+*/
+uint32_t InternalFlash_FindStartAddr(uint32_t addrStart, uint32_t dataLen)
+{
+    uint8_t mark = 0;
+    uint32_t cnt = 0;
+    
+    do {
+        if (Internal_ReadFlash(addrStart + cnt * dataLen, &mark, 1) == 0) return 0; //内部flash读取失败返回0
+         cnt++;
+    } while (mark != 0xFF);
+    
+    return addrStart + --cnt * dataLen;
+}
+
+/**
+ @brief 内部Flash写入标签记录
+ @param head_ref -[in] 指向需要操作的数据链表头
+ @param dataLen -[in] 单个链表结点数据长度
+ @return 无
+*/
+void InternalFlash_WriteRecord(item_info_t** head_ref, uint32_t dataLen)
+{
+    item_info_t* current = *head_ref;
+    uint32_t cnt = 0;
+    uint32_t addrStart = InternalFlash_FindStartAddr(WRITE_START_ADDR, dataLen); //查找可写入标签记录的起始地址
+    
+    while (current != NULL) {
+        Internal_WriteFlash(addrStart + cnt * dataLen, (uint16_t *)current, dataLen / 2);
+        current = current->next;
+        cnt++;
+    }
+}
+
+/**
+ @brief 内部Flash读取标签记录
+ @param dataLen -[in] 单个链表结点数据长度
+ @return 无
+*/
+void InternalFlash_ReadRecord(uint32_t dataLen)
+{
+    item_info_t *item_info_new = (item_info_t *)malloc(sizeof(item_info_t));
+    
+    uint8_t *p = (uint8_t *)item_info_new;
+    uint32_t cnt = 0;
+    
+    do {
+        if (Internal_ReadFlash(WRITE_START_ADDR + cnt * dataLen, (uint16_t *)item_info_new, dataLen) == 0) {
+            free(item_info_new);
+            return ; //内部flash读取失败返回
+        }
+        if(item_info_new->mark != 0xFF) {
+           for (int i = 0; i < dataLen; i++) {
+                printf("%02X ", p[i]);
+            }
+            printf("\r\n");
+        } else {
+            free(item_info_new);
+            return;
+        }
+         cnt++;
+    } while (1);    
+
+}
+
+/**
+ @brief 内部Flash重置标签记录区
+ @param addrStart -[in] 指向需要操作的数据链表头
+ @param addrEnd -[in] 单个链表结点数据长度
+ @return 无
+*/
+void InternalFlash_ResetRecord(uint32_t addrStart, uint32_t addrEnd)
+{
+    uint32_t nbPages = (addrEnd - addrStart) / STM32FLASH_PAGE_SIZE;
+    
+    Internal_ErasePage(addrStart, nbPages);
+}
 /*********************************************END OF FILE**********************/
 

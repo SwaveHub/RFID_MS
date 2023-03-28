@@ -23,6 +23,7 @@
 #include "screen_home.h"
 #include "screen_instorage.h"
 #include "screen_outstorage.h"
+#include "./flash/bsp_internal_flash.h"
 
 /****************************** 私有宏定义 ***********************************/
 
@@ -36,6 +37,7 @@ static lv_obj_t *label_home;
 static lv_obj_t *label_time;
 static lv_obj_t *btn_home, *btn_home_label;
 static lv_obj_t *btn_upload, *btn_upload_label;
+static lv_obj_t *btn_reset, *btn_reset_label;
 
 //图片申明
 LV_IMG_DECLARE(btn_img_instorage);
@@ -43,10 +45,11 @@ LV_IMG_DECLARE(btn_img_outstorage);
 
 static lv_style_t pr_style;
 
-static lv_obj_t *mbox_upload;
+static lv_obj_t *mbox_upload, *mbox_reset;
 /******************************* 私有函数 ************************************/
 static lv_obj_t * mbox_create(lv_obj_t * parent, char* msg, void (*mbox_event_cb)(lv_obj_t * , lv_event_t));//函数申明
 static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event);
+static void mbox_reset_event_cb(lv_obj_t * obj, lv_event_t event);
 
 //事件回调函数
 static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
@@ -57,6 +60,20 @@ static void btn_upload_event_cb(lv_obj_t * obj, lv_event_t event)
 	{
          //创建一个消息对话框
         mbox_upload = mbox_create(lv_scr_act(), "Confirm Upload", mbox_upload_event_cb);          
+	}        
+	default:
+		break;
+	}
+}
+
+static void btn_reset_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+	switch (event)
+	{
+	case LV_EVENT_CLICKED:
+	{
+         //创建一个消息对话框
+        mbox_reset = mbox_create(lv_scr_act(), "Confirm Reset", mbox_reset_event_cb);          
 	}        
 	default:
 		break;
@@ -117,6 +134,22 @@ static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
                 printf("upload\n");
+            }
+            lv_mbox_start_auto_close(obj,0);
+        }
+    }   
+}
+
+static void mbox_reset_event_cb(lv_obj_t * obj, lv_event_t event)
+{
+    uint16_t btn_id;
+    if (obj == mbox_reset) {
+        if(event == LV_EVENT_VALUE_CHANGED) {
+            //获取按钮 id
+            btn_id = lv_mbox_get_active_btn(obj);
+            if (btn_id == 0) { //OK 按钮
+                InternalFlash_ResetRecord(WRITE_START_ADDR, WRITE_END_ADDR);
+                printf("reset\n");
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -203,6 +236,23 @@ void lv_screen_home_start()
     btn_upload_label = lv_label_create(btn_upload,NULL);//给 btn_upload 添加 label 子对象
     lv_label_set_text(btn_upload_label,"Upload");
     lv_obj_set_event_cb(btn_upload,btn_upload_event_cb);//设置事件回调函数
+
+    //创建一个reset按钮   
+    btn_reset = lv_btn_create(scr, NULL);
+    //设置按钮正常态下释放状态样式
+    static lv_style_t my_style_resetbtn_release;//按钮释放状态下的样式
+    lv_style_copy(&my_style_resetbtn_release,&my_style_btn_release);
+    my_style_resetbtn_release.body.main_color = LV_COLOR_MAKE(0xFF,0x00,0x00);
+    my_style_resetbtn_release.body.grad_color = my_style_resetbtn_release.body.main_color;
+    my_style_resetbtn_release.body.shadow.color = my_style_resetbtn_release.body.main_color;
+    lv_btn_set_style(btn_reset,LV_BTN_STYLE_REL,&my_style_resetbtn_release);
+    //设置按钮正常态下按下状态样式
+    lv_btn_set_style(btn_reset,LV_BTN_STYLE_PR,&my_style_btn_press);
+    lv_obj_set_size(btn_reset, 100, 50);//设置大小
+    lv_obj_set_pos(btn_reset, 30, 750);//设置坐标 
+    btn_reset_label = lv_label_create(btn_reset,NULL);//给 btn_reset 添加 label 子对象
+    lv_label_set_text(btn_reset_label,"RESET");
+    lv_obj_set_event_cb(btn_reset,btn_reset_event_cb);//设置事件回调函数
     
     //1.创建按下时的样式
     lv_style_copy(&pr_style,&lv_style_plain);

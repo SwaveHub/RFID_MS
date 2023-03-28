@@ -143,7 +143,6 @@ static void ddlist_event_handler(lv_obj_t * obj,lv_event_t event)
         lv_ddlist_get_selected_str(obj,buf,sizeof(buf));//获取选项值的文本内容
         if (strcmp(buf, "Single") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_SINGLE;
         else if (strcmp(buf, "Multi") == 0) rfid_scan_mode = SCAN_MODE_OUTSTORAGE_MULTI;
-        printf("mode:%d\r\n",rfid_scan_mode);
     }
 }
 

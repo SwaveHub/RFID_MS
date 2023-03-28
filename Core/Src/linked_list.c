@@ -76,39 +76,6 @@ void deleteList(item_info_t** head_ref)
 
     *head_ref = NULL;
 }
-//// 添加节点到链表的末尾
-//void append(item_info_t** head_ref, int new_data) {
-//    // 分配新节点的内存
-//    struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
-//    struct Node* last = *head_ref;
-
-//    // 给新节点赋值
-//    new_node->data = new_data;
-//    new_node->next = NULL;
-
-//    // 如果链表为空，则新节点是第一个节点
-//    if (*head_ref == NULL) {
-//        *head_ref = new_node;
-//        return;
-//    }
-
-//    // 找到链表的最后一个节点
-//    while (last->next != NULL) {
-//        last = last->next;
-//    }
-
-//    // 将新节点添加到链表的末尾
-//    last->next = new_node;
-//    return;
-//}
-
-//// 打印链表的内容
-//void printList(struct Node* node) {
-//    while (node != NULL) {
-//        printf("%d ", node->data);
-//        node = node->next;
-//    }
-//}
 
 //// 删除链表中的指定节点
 //void deleteNode(struct Node** head_ref, int key) {

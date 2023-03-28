@@ -117,7 +117,7 @@ static void btn_ok_event_cb(lv_obj_t * obj, lv_event_t event)
 	{
         uint8_t len = strlen(lv_ta_get_text(ta_item_name));
         int val;
-        if (len > 0 && len < 10) { //输入内容合法
+        if (len > 0 && len < 9) { //输入内容合法
             strcpy(item_name, lv_ta_get_text(ta_item_name));
             if ((val = atoi(lv_ta_get_text(ta_shelf_num))) <= 0xFF) {
                 shelf_num = val;
@@ -212,7 +212,6 @@ static void ddlist_event_handler(lv_obj_t * obj,lv_event_t event)
         lv_ddlist_get_selected_str(obj,buf,sizeof(buf));//获取选项值的文本内容
         if (strcmp(buf, "Single") == 0) rfid_scan_mode = SCAN_MODE_INSTORAGE_SINGLE;
         else if (strcmp(buf, "Multi") == 0) rfid_scan_mode = SCAN_MODE_INSTORAGE_MULTI;
-        printf("mode:%d\r\n",rfid_scan_mode);
     }
 }
 
@@ -243,7 +242,8 @@ static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
             //获取按钮 id
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
-                printf("upload\n");
+                printf("upload:\r\n");
+                InternalFlash_ReadRecord(ITEM_INFO_SIZE);
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -258,7 +258,9 @@ static void mbox_save_event_cb(lv_obj_t * obj, lv_event_t event)
             //获取按钮 id
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
-                 printf("save\n");
+                printf("save\r\n");
+                InternalFlash_WriteRecord(&item_info_head, ITEM_INFO_SIZE);
+                deleteList(&item_info_head);
             }
             lv_mbox_start_auto_close(obj,0);
         }
