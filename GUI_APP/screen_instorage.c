@@ -62,7 +62,7 @@ static bool is_cell_merge = false;//是否合并单元格,默认不合并
 //每一列的宽度
 static const uint16_t TABLE_COL_WIDTH[TABLE_COL_CNT] = {40,260,120};
 
-static uint8_t item_name[10];
+static uint8_t item_name[ITEM_NAME_SIZE];
 static uint8_t shelf_num;   
 static uint8_t layer_num;
 
@@ -116,8 +116,8 @@ static void btn_ok_event_cb(lv_obj_t * obj, lv_event_t event)
 	case LV_EVENT_CLICKED:
 	{
         uint8_t len = strlen(lv_ta_get_text(ta_item_name));
-        int val;
-        if (len > 0 && len < 9) { //输入内容合法
+        uint32_t val;
+        if (len > 0 && len < ITEM_NAME_SIZE) { //输入内容合法
             strcpy(item_name, lv_ta_get_text(ta_item_name));
             if ((val = atoi(lv_ta_get_text(ta_shelf_num))) <= 0xFF) {
                 shelf_num = val;
@@ -224,10 +224,10 @@ static void mbox_ok_event_cb(lv_obj_t * obj, lv_event_t event)
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
                 rfid_scan_enable = SCAN_ENABLE;
-                printf("OK\n");
+                printf("OK\r\n");
             } else if(btn_id == 1) {//Cancel 按钮
                 rfid_scan_enable = SCAN_DISABLE;
-                printf("Cancel\n");
+                printf("Cancel\r\n");
             }
             lv_mbox_start_auto_close(obj,0);
         }

@@ -155,10 +155,10 @@ static void mbox_ok_event_cb(lv_obj_t * obj, lv_event_t event)
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
                 rfid_scan_enable = SCAN_ENABLE;
-                printf("OK\n");
+                printf("OK\r\n");
             } else if(btn_id == 1) {//Cancel 按钮
                 rfid_scan_enable = SCAN_DISABLE;
-                printf("Cancel\n");
+                printf("Cancel\r\n");
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -173,7 +173,8 @@ static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
             //获取按钮 id
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
-                printf("upload\n");
+                printf("upload:\r\n");
+                InternalFlash_ReadRecord(ITEM_INFO_SIZE);
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -188,7 +189,9 @@ static void mbox_save_event_cb(lv_obj_t * obj, lv_event_t event)
             //获取按钮 id
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
-                 printf("save\n");
+                printf("save\r\n");
+                InternalFlash_WriteRecord(&item_info_head, ITEM_INFO_SIZE);
+                deleteList(&item_info_head);
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -429,7 +432,6 @@ void screen_outstorage_record_add(uint8_t *tid)
             sprintf(buf2, "%02X", item_info_new->TID[i]);
             strcat(buf, buf2);
         }
-        printf("tid:%s\r\n", buf);
         lv_table_set_cell_value(table_detail,record_no,1,buf);
         memset(buf, 0, sizeof(buf));
         Unix_To_YMD_Time(&system_time, item_info_new->outstorage_time);

@@ -16,6 +16,8 @@
   */
 #include "./flash/bsp_internal_flash.h"
 
+void InternalFlash_UpdateRecord(item_info_t* item_info, uint32_t dataLen);
+
 /**
  @brief 内部Flash读取
  @param address -[in] 读取的地址
@@ -56,13 +58,14 @@ uint32_t Internal_ReadFlash(uint32_t addrStart, void *pData, uint32_t dataLen)
  @param address -[in] 写入的地址
  @param pData -[in] 指向需要操作的数据
  @param dataLen -[in] 数据长度
- @return 实际写入的数据量，单位：字节
+ @return 实际写入的数据量，单位：半字
 */
 uint32_t Internal_WriteFlashNoCheck(uint32_t addrStart, const uint16_t *pData, uint32_t dataLen)
 {
     uint32_t nwrite = dataLen;
     uint32_t addrmax = STM32FLASH_END - 2;
-
+    /* 解锁FLASH */
+    HAL_FLASH_Unlock();
     while(nwrite)
     {
         if(addrStart > addrmax)
@@ -80,6 +83,8 @@ uint32_t Internal_WriteFlashNoCheck(uint32_t addrStart, const uint16_t *pData, u
         pData++;
         addrStart += 2;
     }
+    /* 加锁FLASH */
+    HAL_FLASH_Lock();        
     return (dataLen - nwrite);
 }
 
@@ -239,15 +244,38 @@ int Internal_ErasePage(uint32_t pageAddress, uint32_t nbPages)
 */
 uint32_t InternalFlash_FindStartAddr(uint32_t addrStart, uint32_t dataLen)
 {
-    uint8_t mark = 0;
+    uint16_t mark = 0;
     uint32_t cnt = 0;
     
     do {
-        if (Internal_ReadFlash(addrStart + cnt * dataLen, &mark, 1) == 0) return 0; //内部flash读取失败返回0
+        if (Internal_ReadFlash(addrStart + cnt * dataLen, &mark, 2) == 0) return 0; //内部flash读取失败返回0
          cnt++;
-    } while (mark != 0xFF);
+    } while (mark != 0xFFFF);
     
     return addrStart + --cnt * dataLen;
+}
+
+/**
+ @brief 内部Flash查找指定标签TID记录的起始地址
+ @param addrStart -[in] 查找区间起始地址
+ @param dataLen -[in] 数据长度
+ @return 指定标签TID记录的起始地址
+*/
+uint32_t InternalFlash_FindTIDAddr(uint8_t *tid, uint32_t addrStart, uint32_t dataLen)
+{
+    uint32_t cnt = 0;
+    item_info_t *item_info_new = (item_info_t *)malloc(sizeof(item_info_t));
+    
+    do {
+        Internal_ReadFlash(WRITE_START_ADDR + cnt * dataLen, (uint16_t *)item_info_new, dataLen);
+        if (memcmp(tid, item_info_new->TID, 12) == 0) {
+            free(item_info_new);
+            return WRITE_START_ADDR + cnt * dataLen;
+        }
+         cnt++;
+    } while (item_info_new->mark != 0xFFFF);
+    
+    return 0;
 }
 
 /**
@@ -260,10 +288,18 @@ void InternalFlash_WriteRecord(item_info_t** head_ref, uint32_t dataLen)
 {
     item_info_t* current = *head_ref;
     uint32_t cnt = 0;
-    uint32_t addrStart = InternalFlash_FindStartAddr(WRITE_START_ADDR, dataLen); //查找可写入标签记录的起始地址
+    uint32_t addrStart = 0;
     
     while (current != NULL) {
-        Internal_WriteFlash(addrStart + cnt * dataLen, (uint16_t *)current, dataLen / 2);
+        //根据不同的mark，用不同的方式写记录至flash
+        if (current->mark == MARK_INSTORAGE) {
+            addrStart = InternalFlash_FindStartAddr(WRITE_START_ADDR, dataLen); //查找可写入标签记录的起始地址
+            if (addrStart >= WRITE_START_ADDR && addrStart <= WRITE_END_ADDR - dataLen) { //地址合法
+                Internal_WriteFlash(addrStart , (uint16_t *)current, dataLen / 2);
+            }
+        } else if (current->mark == MARK_OUTSTORAGE) {
+            InternalFlash_UpdateRecord(current, dataLen);
+        }
         current = current->next;
         cnt++;
     }
@@ -286,7 +322,7 @@ void InternalFlash_ReadRecord(uint32_t dataLen)
             free(item_info_new);
             return ; //内部flash读取失败返回
         }
-        if(item_info_new->mark != 0xFF) {
+        if(item_info_new->mark != 0xFFFF) {
            for (int i = 0; i < dataLen; i++) {
                 printf("%02X ", p[i]);
             }
@@ -302,8 +338,8 @@ void InternalFlash_ReadRecord(uint32_t dataLen)
 
 /**
  @brief 内部Flash重置标签记录区
- @param addrStart -[in] 指向需要操作的数据链表头
- @param addrEnd -[in] 单个链表结点数据长度
+ @param addrStart -[in] 查找区间起始地址
+ @param addrEnd -[in] 查找区间结束地址
  @return 无
 */
 void InternalFlash_ResetRecord(uint32_t addrStart, uint32_t addrEnd)
@@ -312,5 +348,27 @@ void InternalFlash_ResetRecord(uint32_t addrStart, uint32_t addrEnd)
     
     Internal_ErasePage(addrStart, nbPages);
 }
+
+/**
+ @brief 内部Flash更新标签记录
+ @param head_ref -[in] 指向需要操作的数据链表头
+ @param dataLen -[in] 数据长度
+ @return 无
+*/
+void InternalFlash_UpdateRecord(item_info_t* item_info, uint32_t dataLen)
+{
+    item_info_t* item_info_new = malloc(sizeof(item_info_t));
+    uint32_t addrStart = 0; 
+    
+   addrStart = InternalFlash_FindTIDAddr(item_info->TID, WRITE_START_ADDR, dataLen);
+    if (addrStart >= WRITE_START_ADDR && addrStart <= WRITE_END_ADDR - dataLen) { //地址合法
+        Internal_ReadFlash(addrStart, (uint16_t *)item_info_new, dataLen);
+        item_info_new->mark = item_info->mark;
+        item_info_new->outstorage_time = item_info->outstorage_time;
+        Internal_WriteFlashNoCheck(addrStart, (uint16_t *)item_info_new, dataLen / 2);
+    }
+    free(item_info_new);
+}
+
 /*********************************************END OF FILE**********************/
 

@@ -133,7 +133,8 @@ static void mbox_upload_event_cb(lv_obj_t * obj, lv_event_t event)
             //获取按钮 id
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
-                printf("upload\n");
+                printf("upload:\r\n");
+                InternalFlash_ReadRecord(ITEM_INFO_SIZE);
             }
             lv_mbox_start_auto_close(obj,0);
         }
@@ -149,7 +150,7 @@ static void mbox_reset_event_cb(lv_obj_t * obj, lv_event_t event)
             btn_id = lv_mbox_get_active_btn(obj);
             if (btn_id == 0) { //OK 按钮
                 InternalFlash_ResetRecord(WRITE_START_ADDR, WRITE_END_ADDR);
-                printf("reset\n");
+                printf("reset\r\n");
             }
             lv_mbox_start_auto_close(obj,0);
         }

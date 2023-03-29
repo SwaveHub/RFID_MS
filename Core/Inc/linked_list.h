@@ -7,17 +7,17 @@
 #include "stm32f1xx_hal.h"
 
 /******************************** 宏定义 *************************************/
-#define MARK_INSTORAGE 0xFC      //入库阶段标记
-#define MARK_OUTSTORAGE 0xF0  //出库阶段标记
-#define MARK_DIRTY 0xC0              //出库且上传后阶段标记
+#define MARK_INSTORAGE 0xFCFC      //入库阶段标记
+#define MARK_OUTSTORAGE 0x0000  //出库阶段标记
 
+#define ITEM_NAME_SIZE  13
 #define ITEM_INFO_SIZE   (sizeof(item_info_t) - sizeof(item_info_t *))
 
 /***************************** 全局变量声明 **********************************/
 typedef struct item_info_node{
-    uint8_t mark;
+    uint16_t mark;
     uint8_t TID[12]; 
-    uint8_t name[9];
+    uint8_t name[ITEM_NAME_SIZE];
     uint8_t shelf;   
     uint8_t layer;
     uint32_t instorage_time;
